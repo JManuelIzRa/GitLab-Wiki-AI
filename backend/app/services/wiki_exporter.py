@@ -13,7 +13,7 @@ quiere exportar a otro formato (PDF, HTML) reusando el mismo orden de secciones.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _slugify_anchor(title: str) -> str:
@@ -26,7 +26,7 @@ def export_wiki_to_markdown(repository, pages: list) -> str:
     repository: objeto con .name, .project_path, .gitlab_url, .default_branch, .last_commit_sha
     pages: lista de WikiPage ya ordenadas (root primero, luego las de parent_slug == "modules")
     """
-    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     lines = [
         f"# Wiki: {repository.name}",

@@ -5,7 +5,7 @@ Un Repository representa un proyecto GitLab indexado.
 Un IndexJob representa una ejecución de indexado (con su estado y progreso).
 Una WikiPage es una página generada del wiki, ligada a un Repository.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, JSON
@@ -39,8 +39,8 @@ class Repository(Base):
     last_commit_sha: Mapped[str] = mapped_column(String(64), default="")
     indexed_in_qdrant: Mapped[bool] = mapped_column(default=False)  # True si el código se embebió correctamente
     dependency_graph: Mapped[dict] = mapped_column(JSON, default=dict)  # {"nodes": [...], "edges": [...]}
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     pages: Mapped[list["WikiPage"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
     jobs: Mapped[list["IndexJob"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
@@ -55,7 +55,7 @@ class IndexJob(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)       # 0-100
     current_step: Mapped[str] = mapped_column(String(256), default="")
     error_message: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     repository: Mapped["Repository"] = relationship(back_populates="jobs")
@@ -72,6 +72,6 @@ class WikiPage(Base):
     parent_slug: Mapped[str] = mapped_column(String(256), default="")  # para jerarquía en el sidebar
     content_markdown: Mapped[str] = mapped_column(Text, default="")
     source_files: Mapped[list] = mapped_column(JSON, default=list)     # lista de paths usados como fuente
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     repository: Mapped["Repository"] = relationship(back_populates="pages")

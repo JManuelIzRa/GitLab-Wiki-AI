@@ -1,35 +1,22 @@
 """
-Cliente de embeddings.
+Cliente de embeddings local via HuggingFace.
 
-Habla contra un servicio propio (EMBEDDING_URL) que respeta el contrato estándar
-de OpenAI para embeddings:
-
-    POST {EMBEDDING_URL}
-    body: {"input": [...textos...], "model": "..."}
-    -> {"data": [{"embedding": [...]}, ...]}
-
-Se usa httpx directo en vez de el SDK de OpenAI porque EMBEDDING_URL puede vivir
-en un host/puerto distinto al del LLM de chat (servicio de embeddings dedicado),
-así que no comparte cliente con WikiGenerator.
+Usa HuggingFaceEmbedding de LlamaIndex para generar embeddings localmente,
+sin depender de un servicio externo. El modelo se descarga una vez y se cachea
+en disco (configurable via MODELS_CACHE_DIR en .env).
 """
 from __future__ import annotations
 
-import httpx
+import asyncio
+from pathlib import Path
+
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 from app.core.config import settings
 
 
 class EmbeddingError(Exception):
-    """Fallo al generar embeddings (servicio caído, respuesta inesperada, etc.)."""
-
-
-from openai import AsyncOpenAI
-
-from app.core.config import settings
-
-
-from llama_index.core import Settings as LISettings
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+    """Fallo al generar embeddings."""
 
 
 class EmbeddingClient:
@@ -38,25 +25,22 @@ class EmbeddingClient:
         model: HuggingFaceEmbedding | None = None,
     ):
         self._model = model or HuggingFaceEmbedding(
-            cache_folder=r"C:\Users\José Manuel\Downloads\tmp\deepwiki-gitlab\backend\models_cache"
+            cache_folder=settings.models_cache_dir,
         )
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
 
+        truncated = [text[:8000] for text in texts]
+        loop = asyncio.get_event_loop()
         try:
-            truncated = [text[:8000] for text in texts]
-
-            return [
-                self._model.get_text_embedding(text)
-                for text in truncated
-            ]
-
+            return await loop.run_in_executor(
+                None,
+                lambda: [self._model.get_text_embedding(t) for t in truncated],
+            )
         except Exception as e:
-            raise EmbeddingError(
-                f"Error generando embeddings con HuggingFace: {e}"
-            ) from e
+            raise EmbeddingError(f"Error generando embeddings con HuggingFace: {e}") from e
 
     async def embed_one(self, text: str) -> list[float]:
         embeddings = await self.embed_batch([text])

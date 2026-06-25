@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -70,9 +70,7 @@ async def run_index_job(job_id: int, gitlab_url: str, project_path: str,
         try:
             await _index_repository(session, job, repo, gitlab_url, project_path, private_token,
                                      branch, force_reindex)
-        except GitLabAuthError as e:
-            await _update_job(session, job, status=JobStatus.FAILED.value, error=str(e))
-        except GitLabNotFoundError as e:
+        except (GitLabAuthError, GitLabNotFoundError) as e:
             await _update_job(session, job, status=JobStatus.FAILED.value, error=str(e))
         except Exception as e:  # noqa: BLE001 - queremos capturar cualquier fallo y reportarlo al usuario
             logger.exception("Fallo indexando job %s", job_id)
@@ -95,11 +93,13 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
     # "comprobar si hay cambios" en vez de forzar una regeneración completa.
     previous_sha = repo.last_commit_sha
     existing_pages_count = (
-        await session.execute(select(WikiPage).where(WikiPage.repository_id == repo.id))
-    ).scalars().all()
+        await session.execute(
+            select(func.count(WikiPage.id)).where(WikiPage.repository_id == repo.id)
+        )
+    ).scalar()
 
     if (not force_reindex and previous_sha and previous_sha == project.last_commit_sha
-            and len(existing_pages_count) > 0):
+            and existing_pages_count > 0):
         await _update_job(
             session, job, status=JobStatus.DONE.value, progress=100,
             step=f"Sin cambios desde el último indexado (commit {project.last_commit_sha[:8]}); wiki existente reutilizado.",

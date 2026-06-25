@@ -2,6 +2,8 @@
 Configuración central de la aplicación.
 Todos los valores se pueden sobreescribir con variables de entorno o un archivo .env
 """
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,15 +36,17 @@ class Settings(BaseSettings):
     # más pequeños y más enfocados (vía RAG) en vez de "meter todo" en el prompt.
     max_chars_per_ai_call: int = 12_000
     max_chat_tokens: int = 1200
-    clone_depth: int = 1
 
     # --- Chunking de código para RAG ---
-    chunk_max_chars: int = 1500       # tamaño objetivo de cada fragmento de código indexado
-    chunk_overlap_chars: int = 200    # superposición entre fragmentos consecutivos del mismo archivo
+    chunk_max_chars: int = 1500       # alias de code_chunk_max_chars; usado en tests
+    chunk_overlap_chars: int = 200    # superposición en chars (referencia para tests)
     rag_top_k: int = 6                # nº de chunks de código recuperados por pregunta
     code_chunk_lines: int = 40
     code_chunk_lines_overlap: int = 15
     code_chunk_max_chars: int = 1500
+
+    # --- Cache local de modelos HuggingFace ---
+    models_cache_dir: str = str(Path.home() / ".cache" / "deepwiki" / "models")
 
     # --- CORS ---
     cors_origins: list[str] = ["*"]

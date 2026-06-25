@@ -208,10 +208,13 @@ Si la información disponible no permite saber algo con certeza, indícalo en ve
         un resumen breve del wiki ya generado. Este método solo construye el prompt final.
         """
         code_context = _format_retrieved_chunks(retrieved_chunks)
+        wiki_block = (
+            f"--- RESUMEN DEL WIKI ---\n{_truncate(wiki_summary, 3000)}\n--- FIN RESUMEN ---\n"
+            if wiki_summary else ""
+        )
         prompt = f"""Proyecto: `{project_name}`
 
-{"--- RESUMEN DEL WIKI ---" + chr(10) + _truncate(wiki_summary, 3000) + chr(10) + "--- FIN RESUMEN ---" + chr(10) if wiki_summary else ""}
---- FRAGMENTOS DE CÓDIGO RELEVANTES (recuperados por búsqueda semántica) ---
+{wiki_block}--- FRAGMENTOS DE CÓDIGO RELEVANTES (recuperados por búsqueda semántica) ---
 {_truncate(code_context, settings.max_chars_per_ai_call)}
 --- FIN FRAGMENTOS ---
 

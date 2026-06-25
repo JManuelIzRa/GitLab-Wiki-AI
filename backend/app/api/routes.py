@@ -51,7 +51,7 @@ async def index_repository(
             select(Repository).where(
                 Repository.gitlab_url == payload.gitlab_url,
                 Repository.project_path == payload.project_path,
-            ).order_by(Repository.id.desc())
+            ).order_by(Repository.id.desc()).limit(1)
         )
     ).scalars().first()
 

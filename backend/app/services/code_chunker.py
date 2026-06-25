@@ -20,6 +20,7 @@ necesario en el peor caso es preferible a no indexar nada de ese archivo.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 
 from app.core.config import settings
@@ -115,7 +116,6 @@ def chunk_file(file_path: str, content: str, language: str | None = None, parser
         return []
 
     if language is None:
-        import os
         ext = os.path.splitext(file_path)[1].lower()
         language = EXTENSION_TO_TREE_SITTER_LANGUAGE.get(ext)
 
@@ -170,7 +170,6 @@ def chunk_files(file_contents: dict[str, str], parsers_by_language: dict[str, ob
     parsers_by_language = parsers_by_language or {}
     all_chunks: list[CodeChunk] = []
     for path, content in file_contents.items():
-        import os
         ext = os.path.splitext(path)[1].lower()
         language = EXTENSION_TO_TREE_SITTER_LANGUAGE.get(ext)
         parser = parsers_by_language.get(language) if language else None

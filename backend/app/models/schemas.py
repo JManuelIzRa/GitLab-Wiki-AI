@@ -4,7 +4,7 @@ Separados de los modelos de DB para no acoplar el contrato HTTP al esquema de ta
 """
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------- Requests ----------
@@ -32,6 +32,8 @@ class CodeSearchRequest(BaseModel):
 # ---------- Responses ----------
 
 class IndexJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     job_id: int
     repository_id: int
     status: str
@@ -39,11 +41,10 @@ class IndexJobResponse(BaseModel):
     current_step: str
     error_message: str = ""
 
-    class Config:
-        from_attributes = True
-
 
 class RepositorySummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     gitlab_url: str
     project_path: str
@@ -54,27 +55,22 @@ class RepositorySummary(BaseModel):
     indexed_in_qdrant: bool
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class WikiPageSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     slug: str
     title: str
     order: int
     parent_slug: str
 
-    class Config:
-        from_attributes = True
-
 
 class WikiPageDetail(WikiPageSummary):
+    model_config = ConfigDict(from_attributes=True)
+
     content_markdown: str
     source_files: list[str]
-
-    class Config:
-        from_attributes = True
 
 
 class WikiStructureResponse(BaseModel):
