@@ -1,0 +1,143 @@
+"""
+Cliente para hablar con una instancia de GitLab (self-hosted o gitlab.com).
+
+Usamos httpx directamente contra la API REST v4 en lugar de python-gitlab
+para tener control fino sobre paginación, timeouts y manejo de errores,
+y para que el resto del código no dependa de una librería externa pesada.
+"""
+from __future__ import annotations
+
+import base64
+from dataclasses import dataclass
+from urllib.parse import quote
+
+import httpx
+
+
+class GitLabAuthError(Exception):
+    """Token inválido o sin permisos suficientes."""
+
+
+class GitLabNotFoundError(Exception):
+    """El proyecto, branch o archivo no existe."""
+
+
+@dataclass
+class GitLabFile:
+    path: str
+    size: int
+
+
+@dataclass
+class GitLabProject:
+    id: str
+    path_with_namespace: str
+    name: str
+    description: str
+    default_branch: str
+    last_commit_sha: str
+
+
+class GitLabClient:
+    """
+    Cliente mínimo y robusto para la API v4 de GitLab.
+    Soporta cualquier instancia self-hosted: solo cambia `base_url`.
+    """
+
+    def __init__(self, base_url: str, private_token: str, timeout: float = 30.0):
+        self.base_url = base_url.rstrip("/")
+        self.api_url = f"{self.base_url}/api/v4"
+        self.headers = {"PRIVATE-TOKEN": private_token}
+        self.timeout = timeout
+
+    async def _get(self, url: str, params: dict | None = None) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(url, headers=self.headers, params=params)
+        if resp.status_code == 401:
+            raise GitLabAuthError("Token inválido, expirado o sin permisos suficientes (scope read_api/read_repository).")
+        if resp.status_code == 404:
+            raise GitLabNotFoundError(f"Recurso no encontrado en GitLab: {url}")
+        resp.raise_for_status()
+        return resp
+
+    async def get_project(self, project_path: str) -> GitLabProject:
+        """project_path puede ser 'grupo/subgrupo/proyecto' (se URL-encodea)."""
+        encoded = quote(project_path, safe="")
+        resp = await self._get(f"{self.api_url}/projects/{encoded}")
+        data = resp.json()
+
+        last_commit_sha = ""
+        try:
+            branch_resp = await self._get(
+                f"{self.api_url}/projects/{data['id']}/repository/branches/{quote(data['default_branch'], safe='')}"
+            )
+            last_commit_sha = branch_resp.json().get("commit", {}).get("id", "")
+        except Exception:
+            pass
+
+        return GitLabProject(
+            id=str(data["id"]),
+            path_with_namespace=data["path_with_namespace"],
+            name=data["name"],
+            description=data.get("description") or "",
+            default_branch=data.get("default_branch") or "main",
+            last_commit_sha=last_commit_sha,
+        )
+
+    async def list_repository_tree(self, project_id: str, branch: str, max_files: int) -> list[GitLabFile]:
+        """
+        Lista TODOS los archivos del repo (recursivo), paginando.
+        Se detiene si supera max_files para no explotar el indexado en monorepos gigantes.
+        """
+        files: list[GitLabFile] = []
+        page = 1
+        per_page = 100
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            while True:
+                resp = await client.get(
+                    f"{self.api_url}/projects/{project_id}/repository/tree",
+                    headers=self.headers,
+                    params={
+                        "recursive": "true",
+                        "ref": branch,
+                        "per_page": per_page,
+                        "page": page,
+                    },
+                )
+                if resp.status_code == 401:
+                    raise GitLabAuthError("Token inválido o sin permisos para listar el árbol del repositorio.")
+                if resp.status_code == 404:
+                    raise GitLabNotFoundError("Branch o proyecto no encontrado al listar el árbol.")
+                resp.raise_for_status()
+                items = resp.json()
+                if not items:
+                    break
+                for item in items:
+                    if item.get("type") == "blob":
+                        files.append(GitLabFile(path=item["path"], size=0))
+                if len(files) >= max_files:
+                    files = files[:max_files]
+                    break
+                next_page = resp.headers.get("x-next-page")
+                if not next_page:
+                    break
+                page = int(next_page)
+        return files
+
+    async def get_file_content(self, project_id: str, file_path: str, branch: str) -> str | None:
+        """Devuelve el contenido decodificado de un archivo, o None si no es texto/decodificable."""
+        encoded_path = quote(file_path, safe="")
+        try:
+            resp = await self._get(
+                f"{self.api_url}/projects/{project_id}/repository/files/{encoded_path}",
+                params={"ref": branch},
+            )
+        except GitLabNotFoundError:
+            return None
+        data = resp.json()
+        content_b64 = data.get("content", "")
+        try:
+            raw = base64.b64decode(content_b64)
+            return raw.decode("utf-8")
+        except (UnicodeDecodeError, ValueError):
+            return None  # binario o encoding no soportado
