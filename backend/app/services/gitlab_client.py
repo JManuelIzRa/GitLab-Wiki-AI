@@ -42,17 +42,31 @@ class GitLabClient:
     """
     Cliente mínimo y robusto para la API v4 de GitLab.
     Soporta cualquier instancia self-hosted: solo cambia `base_url`.
+
+    Reutiliza un único AsyncClient para todas las peticiones, lo que evita
+    el overhead de TCP+TLS por llamada. Usar como context manager (async with)
+    o llamar a close() cuando se termina de usar.
     """
 
     def __init__(self, base_url: str, private_token: str, timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}/api/v4"
-        self.headers = {"PRIVATE-TOKEN": private_token}
-        self.timeout = timeout
+        self._http = httpx.AsyncClient(
+            headers={"PRIVATE-TOKEN": private_token},
+            timeout=timeout,
+        )
+
+    async def close(self) -> None:
+        await self._http.aclose()
+
+    async def __aenter__(self) -> "GitLabClient":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.close()
 
     async def _get(self, url: str, params: dict | None = None) -> httpx.Response:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(url, headers=self.headers, params=params)
+        resp = await self._http.get(url, params=params)
         if resp.status_code == 401:
             raise GitLabAuthError("Token inválido, expirado o sin permisos suficientes (scope read_api/read_repository).")
         if resp.status_code == 404:
@@ -92,36 +106,24 @@ class GitLabClient:
         files: list[GitLabFile] = []
         page = 1
         per_page = 100
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            while True:
-                resp = await client.get(
-                    f"{self.api_url}/projects/{project_id}/repository/tree",
-                    headers=self.headers,
-                    params={
-                        "recursive": "true",
-                        "ref": branch,
-                        "per_page": per_page,
-                        "page": page,
-                    },
-                )
-                if resp.status_code == 401:
-                    raise GitLabAuthError("Token inválido o sin permisos para listar el árbol del repositorio.")
-                if resp.status_code == 404:
-                    raise GitLabNotFoundError("Branch o proyecto no encontrado al listar el árbol.")
-                resp.raise_for_status()
-                items = resp.json()
-                if not items:
-                    break
-                for item in items:
-                    if item.get("type") == "blob":
-                        files.append(GitLabFile(path=item["path"], size=0))
-                if len(files) >= max_files:
-                    files = files[:max_files]
-                    break
-                next_page = resp.headers.get("x-next-page")
-                if not next_page:
-                    break
-                page = int(next_page)
+        while True:
+            resp = await self._get(
+                f"{self.api_url}/projects/{project_id}/repository/tree",
+                params={"recursive": "true", "ref": branch, "per_page": per_page, "page": page},
+            )
+            items = resp.json()
+            if not items:
+                break
+            for item in items:
+                if item.get("type") == "blob":
+                    files.append(GitLabFile(path=item["path"], size=0))
+            if len(files) >= max_files:
+                files = files[:max_files]
+                break
+            next_page = resp.headers.get("x-next-page")
+            if not next_page:
+                break
+            page = int(next_page)
         return files
 
     async def get_file_content(self, project_id: str, file_path: str, branch: str) -> str | None:

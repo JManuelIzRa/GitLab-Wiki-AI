@@ -19,6 +19,17 @@ class EmbeddingError(Exception):
     """Fallo al generar embeddings."""
 
 
+_shared_client: "EmbeddingClient | None" = None
+
+
+def get_embedding_client() -> "EmbeddingClient":
+    """Returns the process-level singleton, creating it on first call."""
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = EmbeddingClient()
+    return _shared_client
+
+
 class EmbeddingClient:
     def __init__(
         self,

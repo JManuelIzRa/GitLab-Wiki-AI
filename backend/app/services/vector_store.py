@@ -46,14 +46,18 @@ class VectorStore:
 
     async def reset_collection(self) -> None:
         """Borra (si existe) y recrea la colección de este repo. Se llama antes de cada reindexado."""
-        try:
-            await self._client.delete_collection(self.collection_name)
-        except Exception:
-            pass  # la colección puede no existir todavía en el primer indexado, no es un error
+        await self.drop_collection()
         await self._client.create_collection(
             collection_name=self.collection_name,
             vectors_config=VectorParams(size=settings.embedding_dimensions, distance=Distance.COSINE),
         )
+
+    async def drop_collection(self) -> None:
+        """Borra la colección si existe. Silencia el error si no existía."""
+        try:
+            await self._client.delete_collection(self.collection_name)
+        except Exception:
+            pass
 
     async def upsert_chunks(self, chunks: list[CodeChunk], embeddings: list[list[float]]) -> None:
         """Sube (o sobreescribe) los puntos correspondientes a una lista de chunks ya embebidos."""
