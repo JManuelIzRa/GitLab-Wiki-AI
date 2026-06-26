@@ -8,7 +8,7 @@ Una WikiPage es una página generada del wiki, ligada a un Repository.
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, JSON
+from sqlalchemy import Index, String, Text, DateTime, ForeignKey, Integer, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -51,7 +51,7 @@ class IndexJob(Base):
     __tablename__ = "index_jobs"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"))
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), index=True)
     status: Mapped[str] = mapped_column(String(32), default=JobStatus.PENDING.value)
     progress: Mapped[int] = mapped_column(Integer, default=0)       # 0-100
     current_step: Mapped[str] = mapped_column(String(256), default="")
@@ -64,9 +64,10 @@ class IndexJob(Base):
 
 class WikiPage(Base):
     __tablename__ = "wiki_pages"
+    __table_args__ = (Index("ix_wiki_pages_repo_slug", "repository_id", "slug"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"))
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), index=True)
     slug: Mapped[str] = mapped_column(String(256), index=True)
     title: Mapped[str] = mapped_column(String(256))
     order: Mapped[int] = mapped_column(Integer, default=0)

@@ -9,8 +9,10 @@ Variables de entorno clave (ver .env.example):
     EMBEDDING_URL       URL del servicio de embeddings
     QDRANT_HOST         Host del servidor Qdrant
 """
+import logging
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,10 +22,33 @@ from app.db.session import init_db
 from app.services.embedding_client import get_embedding_client
 from app.services.wiki_generator import WikiGenerator
 
+logger = logging.getLogger(__name__)
+
+_EXTERNAL_SERVICES = [
+    ("LLM (OPENAI_URL)", settings.openai_url),
+    ("Embeddings (EMBEDDING_URL)", settings.embedding_url),
+    ("Qdrant", f"http://{settings.qdrant_host}:{settings.qdrant_port}/"),
+]
+
+
+async def _warn_unreachable_services() -> None:
+    """Log a warning for each external service that is not reachable at startup."""
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for name, url in _EXTERNAL_SERVICES:
+            try:
+                await client.get(url)
+            except Exception as exc:
+                logger.warning(
+                    "Service '%s' at %s is not reachable: %s — "
+                    "dependent features will be degraded until it comes up.",
+                    name, url, exc,
+                )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await _warn_unreachable_services()
     get_embedding_client()
     app.state.wiki_generator = WikiGenerator()
     yield
@@ -50,4 +75,14 @@ app.include_router(router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    """Returns application status and reachability of each external service."""
+    services: dict[str, str] = {}
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for name, url in _EXTERNAL_SERVICES:
+            try:
+                await client.get(url)
+                services[name] = "ok"
+            except Exception:
+                services[name] = "unreachable"
+    overall = "ok" if all(v == "ok" for v in services.values()) else "degraded"
+    return {"status": overall, "services": services}

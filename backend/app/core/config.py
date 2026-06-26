@@ -11,17 +11,17 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # --- LLM de chat/generación (servidor OpenAI-compatible local) ---
-    openai_url: str = "http://192.168.0.100:8000/"
+    openai_url: str = "http://localhost:8000/"
     openai_chat_model: str = "qwen2.5-3b-instruct-q4_k_m.gguf"
     openai_api_key: str = "not-needed"  # algunos servidores locales exigen un valor no vacío aunque no lo validen
 
     # --- Embeddings (servicio propio, contrato OpenAI: {input, model} -> {data:[{embedding}]}) ---
-    embedding_url: str = "http://192.168.0.100:8080/embed"
+    embedding_url: str = "http://localhost:8080/embed"
     openai_embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 384  # dimensión de text-embedding-3-small; ajustar si tu servicio usa otro modelo
 
     # --- Qdrant (vector store para RAG sobre código) ---
-    qdrant_host: str = "192.168.0.100"
+    qdrant_host: str = "localhost"
     qdrant_port: int = 6333
     qdrant_collection_prefix: str = "deepwiki_repo_"  # se sufija con el id del repo
 

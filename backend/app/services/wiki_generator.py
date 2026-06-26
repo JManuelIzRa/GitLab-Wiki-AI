@@ -21,12 +21,17 @@ y este módulo solo se encarga de construir el prompt y llamar al LLM.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
 
 import httpx
+import openai
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 from app.services.structure_analyzer import RepoStructure, ModuleInfo
 from app.services.vector_store import RetrievedChunk
 
@@ -106,15 +111,30 @@ class WikiGenerator:
         await self._client.close()
 
     async def _ask(self, user_prompt: str, system_prompt: str = SYSTEM_PROMPT, max_tokens: int | None = None) -> str:
-        response = await self._client.chat.completions.create(
-            model=self.model,
-            max_completion_tokens=max_tokens or settings.max_chat_tokens,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        return response.choices[0].message.content or ""
+        _retryable = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError)
+        last_exc: Exception | None = None
+        for attempt in range(4):
+            try:
+                response = await self._client.chat.completions.create(
+                    model=self.model,
+                    max_completion_tokens=max_tokens or settings.max_chat_tokens,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+                return response.choices[0].message.content or ""
+            except openai.RateLimitError as exc:
+                last_exc = exc
+                wait = 2 ** (attempt + 2)  # 4, 8, 16, 32s — give the server more time
+                logger.warning("LLM rate limited (attempt %d/4) — retrying in %ds", attempt + 1, wait)
+                await asyncio.sleep(wait)
+            except _retryable as exc:
+                last_exc = exc
+                wait = 2 ** attempt  # 1, 2, 4, 8s
+                logger.warning("LLM request failed (attempt %d/4): %s — retrying in %ds", attempt + 1, exc, wait)
+                await asyncio.sleep(wait)
+        raise last_exc  # type: ignore[misc]
 
     async def generate_overview(
         self, project_name: str, structure: RepoStructure, readme_content: str | None
