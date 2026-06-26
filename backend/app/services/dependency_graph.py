@@ -2,10 +2,9 @@
 Construcción de un grafo de dependencias entre módulos, a partir de imports/requires
 reales detectados en el código (no solo agrupación por carpeta como structure_analyzer).
 
-Estrategia: tree-sitter AST para Python, JavaScript y TypeScript — más preciso que regex
-porque no captura imports comentados ni strings fuera de contexto import/require.
-Fallback a regex para Go y Java donde la sintaxis es simple y unívoca, y como red de
-seguridad si el parser tree-sitter no está disponible para algún lenguaje.
+Estrategia: tree-sitter AST para Python, JavaScript, TypeScript, y — vía
+tree-sitter-language-pack — también para Rust, Go, Java, Ruby y PHP.
+Fallback a regex cuando el parser no está disponible.
 
 El grafo resultante es a nivel de MÓDULO (primer directorio del path), no de archivo
 individual — un grafo de cientos de archivos sería ilegible; uno de 5-15 módulos es útil.
@@ -19,10 +18,23 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# --- Regex fallback para Go y Java ---
+# --- Regex fallback patterns per language ---
 _IMPORT_PATTERNS_REGEX: dict[str, list[re.Pattern]] = {
     "Go": [re.compile(r'"([\w.\-]+/[\w./\-]+)"')],
     "Java": [re.compile(r"^\s*import\s+(?:static\s+)?([\w]+(?:\.[\w]+)*);", re.MULTILINE)],
+    "Rust": [
+        re.compile(r"^\s*use\s+((?:crate|self|super)(?:::[^\s;{]+)+)", re.MULTILINE),
+        re.compile(r"^\s*mod\s+(\w+)\s*;", re.MULTILINE),
+    ],
+    "Ruby": [
+        re.compile(r"""^\s*require_relative\s+['"]([^'"]+)['"]""", re.MULTILINE),
+        re.compile(r"""^\s*require\s+['"]([^'"]+)['"]""", re.MULTILINE),
+    ],
+    "PHP": [
+        re.compile(r"""^\s*(?:require|include)(?:_once)?\s+['"]([^'"]+)['"]""", re.MULTILINE),
+        re.compile(r"^\s*use\s+([\w\\]+(?:\\[\w\\]+)*)\s*;", re.MULTILINE),
+    ],
+    "Kotlin": [re.compile(r"^\s*import\s+([\w.]+(?:\.\*)?)", re.MULTILINE)],
 }
 
 # Mapping from our language names to tree-sitter language identifiers
@@ -30,6 +42,12 @@ _TS_LANGUAGE_MAP: dict[str, str] = {
     "Python": "python",
     "JavaScript": "javascript",
     "TypeScript": "typescript",
+    "Rust": "rust",
+    "Go": "go",
+    "Java": "java",
+    "Ruby": "ruby",
+    "PHP": "php",
+    "Kotlin": "kotlin",
 }
 
 # Cached parsers — one per tree-sitter language, None if unavailable
@@ -44,6 +62,7 @@ def _get_ts_parser(ts_lang_name: str):
     parser = None
     try:
         from tree_sitter import Language, Parser
+
         if ts_lang_name == "python":
             import tree_sitter_python
             lang = Language(tree_sitter_python.language())
@@ -54,9 +73,15 @@ def _get_ts_parser(ts_lang_name: str):
             import tree_sitter_typescript
             lang = Language(tree_sitter_typescript.language_typescript())
         else:
-            _ts_parser_cache[ts_lang_name] = None
-            return None
-        parser = Parser(lang)
+            # Try tree-sitter-language-pack for the remaining languages
+            try:
+                from tree_sitter_language_pack import get_language
+                lang = get_language(ts_lang_name)
+            except Exception:
+                lang = None
+
+        if lang is not None:
+            parser = Parser(lang)
     except Exception:
         logger.debug("tree-sitter parser unavailable for %s; falling back to regex", ts_lang_name)
 
@@ -64,12 +89,11 @@ def _get_ts_parser(ts_lang_name: str):
     return parser
 
 
+# ---------------------------------------------------------------------------
+# AST-based import extractors (Python, JS/TS)
+# ---------------------------------------------------------------------------
+
 def _extract_python_imports(root_node) -> list[str]:
-    """
-    Walk a Python AST and return all module names referenced by import/from-import
-    statements as dotted strings (e.g. 'app.services.indexer', '.utils', '..helpers').
-    Relative imports preserve the leading dots so the resolver can tell them apart.
-    """
     results: list[str] = []
 
     def walk(node):
@@ -83,7 +107,6 @@ def _extract_python_imports(root_node) -> list[str]:
                             results.append(gc.text.decode("utf-8", errors="replace"))
                             break
         elif node.type == "import_from_statement":
-            # Take only the first module-identifying child and stop.
             for child in node.children:
                 if child.type == "dotted_name":
                     results.append(child.text.decode("utf-8", errors="replace"))
@@ -106,12 +129,6 @@ def _extract_python_imports(root_node) -> list[str]:
 
 
 def _extract_js_ts_imports(root_node) -> list[str]:
-    """
-    Walk a JS/TS AST and return all import source strings found in:
-    - ES6 import statements:  import { x } from './foo'
-    - CommonJS require calls: const x = require('./foo')
-    - Dynamic imports:        import('./foo')
-    """
     results: list[str] = []
 
     def _string_fragment(node) -> str | None:
@@ -129,9 +146,7 @@ def _extract_js_ts_imports(root_node) -> list[str]:
                         results.append(frag)
         elif node.type == "call_expression":
             children = node.children
-            if not children:
-                pass
-            else:
+            if children:
                 callee = children[0]
                 if callee.type == "identifier" and callee.text == b"require":
                     args = node.child_by_field_name("arguments")
@@ -142,7 +157,6 @@ def _extract_js_ts_imports(root_node) -> list[str]:
                                 if frag:
                                     results.append(frag)
                 elif callee.type == "import":
-                    # dynamic import(...)
                     args = node.child_by_field_name("arguments")
                     if args:
                         for arg in args.children:
@@ -157,11 +171,48 @@ def _extract_js_ts_imports(root_node) -> list[str]:
     return results
 
 
+def _extract_generic_imports_from_ast(root_node, language: str) -> list[str]:
+    """Generic AST walker for languages where we collect string/identifier leaf text
+    from import-like nodes. Works for Rust (use_declaration), Go (import_declaration),
+    Java (import_declaration), Ruby (call require/require_relative), PHP (use_declaration).
+    Falls back to [] if we can't identify useful node types.
+    """
+    results: list[str] = []
+    _TEXT = {"string", "string_literal", "interpreted_string_literal",
+              "raw_string_literal", "identifier", "scoped_identifier", "dotted_name"}
+
+    # Node types that carry import semantics in various languages
+    _IMPORT_NODES = {
+        "use_declaration",         # Rust
+        "import_declaration",      # Go, Java
+        "import_statement",        # Java (alt)
+        "require",                 # Ruby call
+        "call",                    # Ruby require / require_relative call
+        "use_statement",           # PHP
+        "namespace_use_declaration",  # PHP
+    }
+
+    def walk(node):
+        if node.type in _IMPORT_NODES:
+            text = node.text
+            if text:
+                results.append(text.decode("utf-8", errors="replace"))
+        for child in node.children:
+            walk(child)
+
+    walk(root_node)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Graph data structures
+# ---------------------------------------------------------------------------
+
 @dataclass
 class ModuleEdge:
     source: str
     target: str
-    weight: int = 1  # number of import references between these two modules
+    weight: int = 1
 
 
 @dataclass
@@ -170,15 +221,12 @@ class DependencyGraph:
     edges: list[ModuleEdge] = field(default_factory=list)
 
 
-def _compute_module_depth(known_paths: set[str]) -> int:
-    """
-    Decide cuántos segmentos de directorio usar para agrupar en "módulo".
+# ---------------------------------------------------------------------------
+# Module-depth heuristic
+# ---------------------------------------------------------------------------
 
-    Si casi todos los archivos comparten el mismo primer directorio (típico de un
-    paquete Python único, ej. todo bajo `app/`), agrupar solo por ese primer nivel
-    produce un grafo de un solo nodo, que no aporta nada. En ese caso usamos 2 niveles
-    en vez de 1 (ej. `app/services` en vez de solo `app`).
-    """
+def _compute_module_depth(known_paths: set[str]) -> int:
+    """Use 2 path segments when all code lives under a single top-level dir."""
     first_segments = {p.split("/")[0] for p in known_paths if "/" in p}
     if len(first_segments) <= 1 and first_segments:
         return 2
@@ -186,18 +234,17 @@ def _compute_module_depth(known_paths: set[str]) -> int:
 
 
 def _module_of(path: str, depth: int = 1) -> str:
-    """First `depth` directory segments of a path."""
     parts = path.split("/")
     if len(parts) <= 1:
         return "."
     return "/".join(parts[:depth]) if len(parts) > depth else "/".join(parts[:-1]) or parts[0]
 
 
+# ---------------------------------------------------------------------------
+# Import resolution helpers
+# ---------------------------------------------------------------------------
+
 def _resolve_relative_import(importer_path: str, import_target: str) -> str | None:
-    """
-    Resolve a JS/TS relative import (e.g. '../utils/foo') to a normalised repo-relative
-    path. Returns None if the result escapes the repo root.
-    """
     importer_dir = os.path.dirname(importer_path)
     resolved = os.path.normpath(os.path.join(importer_dir, import_target))
     if resolved.startswith(".."):
@@ -208,16 +255,12 @@ def _resolve_relative_import(importer_path: str, import_target: str) -> str | No
 def _resolve_to_known_paths(
     raw_targets: list[str], language: str, file_path: str, known_paths: set[str]
 ) -> list[str]:
-    """
-    Map raw import strings (module names or relative paths) to actual file paths that
-    exist in the repo, discarding external packages.
-    """
     matched: list[str] = []
 
     for raw in raw_targets:
         if language in ("JavaScript", "TypeScript"):
             if not raw.startswith("."):
-                continue  # external npm package
+                continue
             resolved = _resolve_relative_import(file_path, raw)
             if resolved is None:
                 continue
@@ -247,12 +290,44 @@ def _resolve_to_known_paths(
             if hit:
                 matched.append(hit)
 
+        elif language == "Rust":
+            # `use crate::services::indexer` → look for services/indexer.rs
+            for part in raw.split("::")[1:]:
+                candidates = [p for p in known_paths if os.path.splitext(os.path.basename(p))[0] == part]
+                matched.extend(candidates[:1])
+
+        elif language == "Ruby":
+            # require_relative '../helpers/foo' → resolve relative
+            if raw.startswith("."):
+                resolved = _resolve_relative_import(file_path, raw)
+                if resolved:
+                    for suffix in ("", ".rb"):
+                        if resolved + suffix in known_paths:
+                            matched.append(resolved + suffix)
+                            break
+            else:
+                # require 'models/user' → look for models/user.rb
+                candidates = [p for p in known_paths if p.endswith(raw + ".rb") or p == raw + ".rb"]
+                matched.extend(candidates[:1])
+
+        elif language == "PHP":
+            # require '../lib/helper.php' or use App\Controller\Foo
+            if "/" in raw or raw.startswith("."):
+                resolved = _resolve_relative_import(file_path, raw)
+                if resolved and resolved in known_paths:
+                    matched.append(resolved)
+            else:
+                # PSR-4: App\Controller\Foo → app/Controller/Foo.php
+                php_path = raw.replace("\\", "/") + ".php"
+                candidates = [p for p in known_paths if p.lower().endswith(php_path.lower())]
+                matched.extend(candidates[:1])
+
         elif language == "Go":
             last_segment = raw.split("/")[-1]
             candidates = [p for p in known_paths if p.split("/")[0] == last_segment]
             matched.extend(candidates[:1])
 
-        elif language == "Java":
+        elif language in ("Java", "Kotlin"):
             first_component = raw.split(".")[0]
             candidates = [p for p in known_paths if p.split("/")[0] == first_component]
             matched.extend(candidates[:1])
@@ -260,13 +335,13 @@ def _resolve_to_known_paths(
     return matched
 
 
+# ---------------------------------------------------------------------------
+# Per-file import detection (AST + regex fallback)
+# ---------------------------------------------------------------------------
+
 def _detect_internal_imports(
     file_path: str, content: str, language: str, known_paths: set[str]
 ) -> list[str]:
-    """
-    Returns repo file paths that file_path imports from.
-    Uses tree-sitter AST for Python/JS/TS; regex for Go/Java; regex fallback on parse failure.
-    """
     raw_targets: list[str] = []
     used_tree_sitter = False
 
@@ -278,8 +353,10 @@ def _detect_internal_imports(
                 tree = parser.parse(content.encode("utf-8", errors="replace"))
                 if language == "Python":
                     raw_targets = _extract_python_imports(tree.root_node)
-                else:
+                elif language in ("JavaScript", "TypeScript"):
                     raw_targets = _extract_js_ts_imports(tree.root_node)
+                else:
+                    raw_targets = _extract_generic_imports_from_ast(tree.root_node, language)
                 used_tree_sitter = True
             except Exception:
                 logger.debug("tree-sitter parse failed for %s; using regex fallback", file_path)
@@ -291,6 +368,10 @@ def _detect_internal_imports(
 
     return _resolve_to_known_paths(raw_targets, language, file_path, known_paths)
 
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
 def build_dependency_graph(
     file_contents: dict[str, str], languages_by_path: dict[str, str]
@@ -304,7 +385,7 @@ def build_dependency_graph(
     edge_weights: dict[tuple[str, str], int] = {}
     modules_seen: set[str] = set()
 
-    _supported = {"JavaScript", "TypeScript", "Python", "Go", "Java"}
+    _supported = {"JavaScript", "TypeScript", "Python", "Go", "Java", "Rust", "Ruby", "PHP", "Kotlin"}
 
     for path, content in file_contents.items():
         language = languages_by_path.get(path)

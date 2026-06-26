@@ -114,6 +114,11 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
         await _update_job(session, job, status=JobStatus.ANALYZING.value, progress=25, step="Analizando estructura del repositorio...")
         structure = analyze_structure(all_paths)
 
+        # Persist monorepo metadata discovered by structure_analyzer
+        repo.is_monorepo = structure.is_monorepo
+        repo.workspace_roots = structure.workspace_roots
+        await session.commit()
+
         # --- 4. Leer README y manifiestos de dependencias en paralelo ---
         await _update_job(session, job, progress=35, step="Leyendo README y manifiestos de dependencias...")
         readme_content = None
@@ -153,14 +158,13 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 ",".join(structure.package_managers),
                 ",".join(structure.dependency_manifests),
             )
-            overview_md = (
-                _reuse_if_unchanged("overview", overview_hash, existing_pages, force_reindex)
-                or await generator.generate_overview(project.name, structure, readme_content)
-            )
+            _reused_overview = _reuse_if_unchanged("overview", overview_hash, existing_pages, force_reindex)
+            overview_md = _reused_overview or await generator.generate_overview(project.name, structure, readme_content)
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="overview", title="Overview", order=order_counter,
                 content_markdown=overview_md, source_files=[structure.readme_path] if structure.readme_path else [],
                 source_hash=overview_hash,
+                is_ai_generated=True,
             ))
             order_counter += 1
 
@@ -174,14 +178,13 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 ",".join(structure.entrypoints),
                 ",".join(structure.config_files),
             )
-            arch_md = (
-                _reuse_if_unchanged("architecture", arch_hash, existing_pages, force_reindex)
-                or await generator.generate_architecture(project.name, structure)
-            )
+            _reused_arch = _reuse_if_unchanged("architecture", arch_hash, existing_pages, force_reindex)
+            arch_md = _reused_arch or await generator.generate_architecture(project.name, structure)
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="architecture", title="Arquitectura", order=order_counter,
                 content_markdown=arch_md, source_files=[m.path for m in structure.modules[:25]],
                 source_hash=arch_hash,
+                is_ai_generated=True,
             ))
             order_counter += 1
 
@@ -200,7 +203,8 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 snippets = [
                     FileSnippet(path=fp, content=c)
                     for fp, c in zip(sample_paths, sample_contents)
-                    if c
+                    # Enforce size limit here too (embedding check covers Qdrant; this covers LLM prompts)
+                    if c and len(c.encode()) <= settings.max_file_size_bytes
                 ]
                 if not snippets:
                     return None
@@ -216,6 +220,7 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                     parent_slug="modules", content_markdown=cached,
                     source_files=[s.path for s in snippets],
                     source_hash=mod_hash,
+                    is_ai_generated=True,
                 )
 
             module_pages = await asyncio.gather(*[_process_module(m) for m in top_modules])
@@ -232,14 +237,13 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 readme_content or "",
                 ",".join(structure.package_managers),
             )
-            setup_md = (
-                _reuse_if_unchanged("setup", setup_hash, existing_pages, force_reindex)
-                or await generator.generate_setup_guide(project.name, structure, manifest_snippets, readme_content)
-            )
+            _reused_setup = _reuse_if_unchanged("setup", setup_hash, existing_pages, force_reindex)
+            setup_md = _reused_setup or await generator.generate_setup_guide(project.name, structure, manifest_snippets, readme_content)
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="setup", title="Cómo ejecutar el proyecto", order=order_counter,
                 content_markdown=setup_md, source_files=structure.dependency_manifests,
                 source_hash=setup_hash,
+                is_ai_generated=True,
             ))
 
         finally:

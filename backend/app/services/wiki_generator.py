@@ -118,6 +118,25 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "--- FIN FRAGMENTOS ---\n\n"
             "Pregunta del usuario: {question}"
         ),
+        "group_overview": (
+            "Genera la página \"Overview del Grupo\" para el grupo GitLab `{group_name}`.\n\n"
+            "El grupo contiene {repo_count} repositorios. A continuación un resumen de cada uno:\n\n"
+            "{repo_summaries}\n\n"
+            "Escribe una página de overview del grupo que explique: el propósito general del grupo, "
+            "los repositorios clave y qué hace cada uno, el stack tecnológico predominante, "
+            "y cómo se interrelacionan los repositorios entre sí (si es deducible). "
+            "Incluye una tabla con los repositorios y sus lenguajes principales. "
+            "Incluye un diagrama ```mermaid``` que muestre cómo se relacionan los repositorios a alto nivel."
+        ),
+        "group_chat_context": (
+            "Grupo GitLab: `{group_name}`\n\n"
+            "Repositorios en el grupo: {repo_list}\n\n"
+            "{wiki_block}"
+            "--- FRAGMENTOS DE CÓDIGO RELEVANTES (de múltiples repos) ---\n"
+            "{code_context}\n"
+            "--- FIN FRAGMENTOS ---\n\n"
+            "Pregunta del usuario: {question}"
+        ),
     },
     "en": {
         "system": (
@@ -194,6 +213,25 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "Project: `{project_name}`\n\n"
             "{wiki_block}"
             "--- RELEVANT CODE SNIPPETS (retrieved by semantic search) ---\n"
+            "{code_context}\n"
+            "--- END SNIPPETS ---\n\n"
+            "User question: {question}"
+        ),
+        "group_overview": (
+            "Generate the \"Group Overview\" page for GitLab group `{group_name}`.\n\n"
+            "The group contains {repo_count} repositories. Below is a summary of each:\n\n"
+            "{repo_summaries}\n\n"
+            "Write a group overview page explaining: the group's overall purpose, "
+            "the key repositories and what each does, the predominant technology stack, "
+            "and how the repositories interrelate (if inferable). "
+            "Include a table listing repositories with their primary languages. "
+            "Include a ```mermaid``` diagram showing how the repositories relate at a high level."
+        ),
+        "group_chat_context": (
+            "GitLab Group: `{group_name}`\n\n"
+            "Repositories in group: {repo_list}\n\n"
+            "{wiki_block}"
+            "--- RELEVANT CODE SNIPPETS (from multiple repos) ---\n"
             "{code_context}\n"
             "--- END SNIPPETS ---\n\n"
             "User question: {question}"
@@ -431,6 +469,107 @@ class WikiGenerator:
         if stream is None:
             raise last_exc  # type: ignore[misc]
 
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+
+    # ------------------------------------------------------------------
+    # Group-level generation
+    # ------------------------------------------------------------------
+
+    async def generate_group_overview(
+        self,
+        group_name: str,
+        repo_summaries: list[dict],
+    ) -> str:
+        """Generate a high-level overview wiki page for a GitLab group.
+
+        Each entry in repo_summaries should have: name, path, pages (list of {title, content}).
+        """
+        summaries_text = ""
+        for rs in repo_summaries:
+            pages_text = "\n".join(
+                f"  - **{p['title']}**: {p['content'][:200].strip()}"
+                for p in rs.get("pages", [])[:4]
+            )
+            summaries_text += (
+                f"### {rs['name']} (`{rs['path']}`)\n{pages_text or '(no wiki pages yet)'}\n\n"
+            )
+
+        prompt = self._p.get("group_overview", _PROMPTS["en"]["group_overview"]).format(
+            group_name=group_name,
+            repo_count=len(repo_summaries),
+            repo_summaries=summaries_text or "(no repos with generated wikis yet)",
+        )
+        return await self._ask(prompt, max_tokens=settings.max_chat_tokens)
+
+    async def answer_group_question_rag(
+        self,
+        group_name: str,
+        repo_names: list[str],
+        question: str,
+        retrieved_chunks: list[RetrievedChunk],
+        group_wiki_summary: str = "",
+    ) -> str:
+        code_context = _format_retrieved_chunks(retrieved_chunks)
+        wiki_block = (
+            f"--- GROUP WIKI SUMMARY ---\n{_truncate(group_wiki_summary, 2000)}\n--- END ---\n\n"
+            if group_wiki_summary else ""
+        )
+        template = self._p.get("group_chat_context", _PROMPTS["en"]["group_chat_context"])
+        prompt = template.format(
+            group_name=group_name,
+            repo_list=", ".join(repo_names) or "(none)",
+            wiki_block=wiki_block,
+            code_context=_truncate(code_context, settings.max_chars_per_ai_call),
+            question=question,
+        )
+        return await self._ask(prompt, system_prompt=self._p["chat_system"])
+
+    async def stream_answer_group_question_rag(
+        self,
+        group_name: str,
+        repo_names: list[str],
+        question: str,
+        retrieved_chunks: list[RetrievedChunk],
+        group_wiki_summary: str = "",
+    ) -> AsyncGenerator[str, None]:
+        code_context = _format_retrieved_chunks(retrieved_chunks)
+        wiki_block = (
+            f"--- GROUP WIKI SUMMARY ---\n{_truncate(group_wiki_summary, 2000)}\n--- END ---\n\n"
+            if group_wiki_summary else ""
+        )
+        template = self._p.get("group_chat_context", _PROMPTS["en"]["group_chat_context"])
+        prompt = template.format(
+            group_name=group_name,
+            repo_list=", ".join(repo_names) or "(none)",
+            wiki_block=wiki_block,
+            code_context=_truncate(code_context, settings.max_chars_per_ai_call),
+            question=question,
+        )
+        messages = [
+            {"role": "system", "content": self._p["chat_system"]},
+            {"role": "user", "content": prompt},
+        ]
+        _retryable = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError)
+        stream = None
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                stream = await self._client.chat.completions.create(
+                    model=self.model,
+                    max_completion_tokens=settings.max_chat_tokens,
+                    messages=messages,
+                    stream=True,
+                )
+                break
+            except _retryable as exc:
+                last_exc = exc
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+        if stream is None:
+            raise last_exc  # type: ignore[misc]
         async for chunk in stream:
             delta = chunk.choices[0].delta.content
             if delta:

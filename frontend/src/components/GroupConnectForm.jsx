@@ -1,25 +1,25 @@
 import { useState } from "react";
 
 /**
- * Pantalla inicial: pide los datos de conexión a GitLab self-hosted o gitlab.com
- * y arranca el job de indexado al enviar.
+ * Form to start indexing a GitLab group (or subgroup).
+ * The PAT is used for discovery + per-repo indexing and is never stored.
  */
-export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, prefill }) {
+export function GroupConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, prefill }) {
   const [gitlabUrl, setGitlabUrl] = useState(prefill?.gitlab_url || "https://gitlab.com");
-  const [projectPath, setProjectPath] = useState(prefill?.project_path || "");
+  const [groupPath, setGroupPath] = useState(prefill?.group_path || "");
   const [privateToken, setPrivateToken] = useState("");
-  const [branch, setBranch] = useState(prefill?.default_branch && prefill.default_branch !== "main" ? prefill.default_branch : "");
+  const [includeSubgroups, setIncludeSubgroups] = useState(true);
   const [showToken, setShowToken] = useState(false);
   const isReindex = Boolean(prefill);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!gitlabUrl.trim() || !projectPath.trim() || !privateToken.trim()) return;
+    if (!gitlabUrl.trim() || !groupPath.trim() || !privateToken.trim()) return;
     onSubmit({
       gitlab_url: gitlabUrl.trim().replace(/\/+$/, ""),
-      project_path: projectPath.trim().replace(/^\/+/, ""),
+      group_path: groupPath.trim().replace(/^\/+/, ""),
       private_token: privateToken.trim(),
-      branch: branch.trim() || null,
+      include_subgroups: includeSubgroups,
       force_reindex: isReindex,
     });
   };
@@ -29,19 +29,19 @@ export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, pref
       <div style={styles.card}>
         {onBack && (
           <button onClick={onBack} style={styles.backLink}>
-            ← ver repositorios indexados
+            ← volver
           </button>
         )}
         <div style={styles.eyebrow}>
           <span style={styles.dot} />
-          atlas / {isReindex ? "reindexar" : "nuevo índice"}
+          atlas / {isReindex ? "reindexar grupo" : "nuevo grupo"}
         </div>
 
-        <h1 style={styles.title}>{isReindex ? "Reindexar repositorio" : "Indexa un repositorio"}</h1>
+        <h1 style={styles.title}>{isReindex ? "Reindexar grupo" : "Indexar grupo de GitLab"}</h1>
         <p style={styles.subtitle}>
           {isReindex
-            ? "Vuelve a comprobar este repo. Si no hubo cambios desde el último indexado, el wiki existente se mantiene sin gastar tiempo ni tokens de más."
-            : "Conecta cualquier instancia de GitLab —self-hosted o gitlab.com— y genera un wiki navegable a partir del código real del proyecto."}
+            ? "Vuelve a descubrir y reindexar todos los repositorios del grupo. Los repos sin cambios se omiten."
+            : "Conecta un grupo de GitLab para generar un wiki unificado con búsqueda semántica y chat cross-repo."}
         </p>
 
         <form onSubmit={handleSubmit} style={styles.form}>
@@ -57,12 +57,12 @@ export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, pref
             />
           </Field>
 
-          <Field label="Ruta del proyecto" hint="grupo/subgrupo/proyecto, sin la URL">
+          <Field label="Ruta del grupo" hint="ej. mi-empresa/equipo-backend (sin la URL base)">
             <input
               type="text"
-              value={projectPath}
-              onChange={(e) => setProjectPath(e.target.value)}
-              placeholder="mi-grupo/mi-proyecto"
+              value={groupPath}
+              onChange={(e) => setGroupPath(e.target.value)}
+              placeholder="mi-empresa/mi-equipo"
               style={{ ...styles.input, ...(isReindex ? styles.inputLocked : {}) }}
               disabled={isReindex}
               required
@@ -90,25 +90,29 @@ export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, pref
             </div>
           </Field>
 
-          <Field label="Branch (opcional)" hint="si se omite, usa el branch por defecto del repo">
+          <label style={styles.checkboxLabel}>
             <input
-              type="text"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              placeholder="main"
-              style={styles.input}
+              type="checkbox"
+              checked={includeSubgroups}
+              onChange={(e) => setIncludeSubgroups(e.target.checked)}
+              style={{ marginRight: 8 }}
             />
-          </Field>
+            <span style={styles.checkboxText}>Incluir subgrupos</span>
+          </label>
 
           {errorMessage && <div style={styles.errorBox}>{errorMessage}</div>}
 
           <button type="submit" style={styles.submitBtn} disabled={isSubmitting}>
-            {isSubmitting ? "Iniciando..." : isReindex ? "Comprobar y reindexar →" : "Generar wiki →"}
+            {isSubmitting
+              ? "Iniciando..."
+              : isReindex
+              ? "Reindexar grupo →"
+              : "Indexar grupo →"}
           </button>
         </form>
 
         <p style={styles.footnote}>
-          El token nunca se almacena: se usa una sola vez para esta sesión de indexado.
+          El token nunca se almacena: se usa para descubrir proyectos y luego para indexar cada repo.
         </p>
       </div>
     </div>
@@ -228,6 +232,15 @@ const styles = {
     fontSize: 12,
     color: "var(--text-secondary)",
     cursor: "pointer",
+  },
+  checkboxLabel: {
+    display: "flex",
+    alignItems: "center",
+    cursor: "pointer",
+  },
+  checkboxText: {
+    fontSize: 13,
+    color: "var(--text-secondary)",
   },
   submitBtn: {
     background: "var(--accent-rust)",

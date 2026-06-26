@@ -1,10 +1,14 @@
 import { useState } from "react";
+import { GroupBrowser } from "./GroupBrowser";
 
 /**
- * Pantalla inicial: lista los repos ya indexados (si hay alguno) para reabrir su wiki
- * sin tener que reindexar, y ofrece el botón para indexar un repo nuevo.
+ * Pantalla inicial con dos pestañas: Repositorios y Grupos.
  */
-export function RepositoryBrowser({ repositories, loading, errorMessage, onOpenRepository, onNewRepository, onDeleteRepository, onReindexRepository }) {
+export function RepositoryBrowser({
+  repositories, loading, errorMessage, onOpenRepository, onNewRepository, onDeleteRepository, onReindexRepository,
+  groups, groupsLoading, groupsError, onOpenGroup, onNewGroup, onDeleteGroup, onReindexGroup,
+}) {
+  const [tab, setTab] = useState("repos");
   const [deletingId, setDeletingId] = useState(null);
 
   const handleDelete = async (e, repoId) => {
@@ -28,69 +32,110 @@ export function RepositoryBrowser({ repositories, loading, errorMessage, onOpenR
       <div style={styles.card}>
         <div style={styles.eyebrow}>
           <span style={styles.dot} />
-          deepwiki-gitlab
+          atlas
         </div>
 
-        <div style={styles.headerRow}>
-          <h1 style={styles.title}>Repositorios indexados</h1>
-          <button onClick={onNewRepository} style={styles.newBtn}>
-            + indexar nuevo repo
+        {/* Tab bar */}
+        <div style={styles.tabBar}>
+          <button
+            onClick={() => setTab("repos")}
+            style={{ ...styles.tabBtn, ...(tab === "repos" ? styles.tabBtnActive : {}) }}
+          >
+            Repositorios
+          </button>
+          <button
+            onClick={() => setTab("groups")}
+            style={{ ...styles.tabBtn, ...(tab === "groups" ? styles.tabBtnActive : {}) }}
+          >
+            Grupos
           </button>
         </div>
 
-        {loading && <p style={styles.hint}>Cargando repositorios…</p>}
+        {/* ---- Repos tab ---- */}
+        {tab === "repos" && (
+          <>
+            <div style={styles.headerRow}>
+              <h1 style={styles.title}>Repositorios indexados</h1>
+              <button onClick={onNewRepository} style={styles.newBtn}>
+                + indexar nuevo repo
+              </button>
+            </div>
 
-        {errorMessage && <div style={styles.errorBox}>{errorMessage}</div>}
+            {loading && <p style={styles.hint}>Cargando repositorios…</p>}
+            {errorMessage && <div style={styles.errorBox}>{errorMessage}</div>}
 
-        {!loading && !errorMessage && repositories.length === 0 && (
-          <div style={styles.emptyState}>
-            <p style={styles.hint}>
-              Todavía no has indexado ningún repositorio. Conecta uno de GitLab para generar
-              su wiki por primera vez.
-            </p>
-            <button onClick={onNewRepository} style={styles.submitBtn}>
-              Indexar mi primer repositorio →
-            </button>
-          </div>
+            {!loading && !errorMessage && repositories.length === 0 && (
+              <div style={styles.emptyState}>
+                <p style={styles.hint}>
+                  Todavía no has indexado ningún repositorio. Conecta uno de GitLab para generar
+                  su wiki por primera vez.
+                </p>
+                <button onClick={onNewRepository} style={styles.submitBtn}>
+                  Indexar mi primer repositorio →
+                </button>
+              </div>
+            )}
+
+            {!loading && repositories.length > 0 && (
+              <ul style={styles.list}>
+                {repositories.map((repo) => (
+                  <li key={repo.id} style={styles.listItem} onClick={() => onOpenRepository(repo)}>
+                    <div style={styles.itemMain}>
+                      <div style={styles.itemName}>{repo.name}</div>
+                      <div style={styles.itemPath}>{repo.project_path}</div>
+                    </div>
+                    <div style={styles.itemMeta}>
+                      <span style={styles.branchTag}>{repo.default_branch}</span>
+                      <span
+                        style={{
+                          ...styles.ragTag,
+                          color: repo.indexed_in_qdrant ? "var(--accent-sage)" : "var(--text-tertiary)",
+                        }}
+                      >
+                        ● {repo.indexed_in_qdrant ? "RAG activo" : "solo wiki"}
+                      </span>
+                      <button
+                        onClick={(e) => handleReindex(e, repo)}
+                        style={styles.reindexBtn}
+                        title="Comprobar si hay cambios y reindexar si es necesario"
+                      >
+                        reindexar
+                      </button>
+                      <button
+                        onClick={(e) => handleDelete(e, repo.id)}
+                        style={styles.deleteBtn}
+                        disabled={deletingId === repo.id}
+                        title="Eliminar este repositorio indexado"
+                      >
+                        {deletingId === repo.id ? "…" : "eliminar"}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
 
-        {!loading && repositories.length > 0 && (
-          <ul style={styles.list}>
-            {repositories.map((repo) => (
-              <li key={repo.id} style={styles.listItem} onClick={() => onOpenRepository(repo)}>
-                <div style={styles.itemMain}>
-                  <div style={styles.itemName}>{repo.name}</div>
-                  <div style={styles.itemPath}>{repo.project_path}</div>
-                </div>
-                <div style={styles.itemMeta}>
-                  <span style={styles.branchTag}>{repo.default_branch}</span>
-                  <span
-                    style={{
-                      ...styles.ragTag,
-                      color: repo.indexed_in_qdrant ? "var(--accent-sage)" : "var(--text-tertiary)",
-                    }}
-                  >
-                    ● {repo.indexed_in_qdrant ? "RAG activo" : "solo wiki"}
-                  </span>
-                  <button
-                    onClick={(e) => handleReindex(e, repo)}
-                    style={styles.reindexBtn}
-                    title="Comprobar si hay cambios y reindexar si es necesario"
-                  >
-                    reindexar
-                  </button>
-                  <button
-                    onClick={(e) => handleDelete(e, repo.id)}
-                    style={styles.deleteBtn}
-                    disabled={deletingId === repo.id}
-                    title="Eliminar este repositorio indexado"
-                  >
-                    {deletingId === repo.id ? "…" : "eliminar"}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+        {/* ---- Groups tab ---- */}
+        {tab === "groups" && (
+          <>
+            <div style={styles.headerRow}>
+              <h1 style={styles.title}>Grupos indexados</h1>
+              <button onClick={onNewGroup} style={styles.newBtn}>
+                + indexar grupo
+              </button>
+            </div>
+            <GroupBrowser
+              groups={groups || []}
+              loading={groupsLoading}
+              errorMessage={groupsError}
+              onOpenGroup={onOpenGroup}
+              onNewGroup={onNewGroup}
+              onDeleteGroup={onDeleteGroup}
+              onReindexGroup={onReindexGroup}
+            />
+          </>
         )}
       </div>
     </div>
@@ -110,6 +155,29 @@ const styles = {
   card: {
     width: "100%",
     maxWidth: 560,
+  },
+  tabBar: {
+    display: "flex",
+    gap: 4,
+    marginBottom: 28,
+    borderBottom: "1px solid var(--border-subtle)",
+    paddingBottom: 0,
+  },
+  tabBtn: {
+    background: "none",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    padding: "8px 14px",
+    fontSize: 13,
+    fontWeight: 500,
+    color: "var(--text-tertiary)",
+    cursor: "pointer",
+    marginBottom: -1,
+  },
+  tabBtnActive: {
+    color: "var(--text-primary)",
+    fontWeight: 600,
+    borderBottom: "2px solid var(--accent-rust)",
   },
   eyebrow: {
     display: "flex",

@@ -3,8 +3,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Pencil, Check, X } from "lucide-react";
+import { Pencil, Check, X, History, RotateCcw, Upload } from "lucide-react";
 import mermaid from "../utils/mermaid";
+import { api } from "../api/client";
 
 function MermaidDiagram({ code }) {
   const containerRef = useRef(null);
@@ -40,17 +41,157 @@ function MermaidDiagram({ code }) {
   return <div ref={containerRef} style={styles.mermaidContainer} />;
 }
 
-export function WikiPageContent({ page, onUpdatePage }) {
+function RevisionPanel({ repoId, slug, onRestore, onClose }) {
+  const [revisions, setRevisions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [restoring, setRestoring] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getWikiRevisions(repoId, slug).then((data) => {
+      if (!cancelled) { setRevisions(data); setLoading(false); }
+    }).catch((err) => {
+      if (!cancelled) { setError(err.message); setLoading(false); }
+    });
+    return () => { cancelled = true; };
+  }, [repoId, slug]);
+
+  const handleRestore = async (rev) => {
+    setRestoring(rev.id);
+    try {
+      const restored = await api.restoreWikiRevision(repoId, slug, rev.id);
+      onRestore(restored);
+      onClose();
+    } catch (err) {
+      setError(err.message || "No se pudo restaurar.");
+      setRestoring(null);
+    }
+  };
+
+  return (
+    <div style={styles.revisionOverlay}>
+      <div style={styles.revisionPanel}>
+        <div style={styles.revisionHeader}>
+          <span style={styles.revisionTitle}>Historial de revisiones</span>
+          <button onClick={onClose} style={styles.closeBtn}><X size={14} /></button>
+        </div>
+        {loading && <div style={styles.revisionInfo}>Cargando…</div>}
+        {error && <div style={styles.revisionError}>{error}</div>}
+        {!loading && revisions.length === 0 && (
+          <div style={styles.revisionInfo}>No hay revisiones guardadas todavía.</div>
+        )}
+        <div style={styles.revisionList}>
+          {revisions.map((rev) => (
+            <div key={rev.id} style={styles.revisionItem}>
+              <div style={styles.revisionMeta}>
+                <span style={styles.revisionDate}>
+                  {new Date(rev.created_at).toLocaleString()}
+                </span>
+                {rev.is_ai_generated && (
+                  <span style={styles.aiBadge}>IA</span>
+                )}
+              </div>
+              <p style={styles.revisionPreview}>{rev.content_preview}…</p>
+              <button
+                style={styles.restoreBtn}
+                disabled={restoring === rev.id}
+                onClick={() => handleRestore(rev)}
+              >
+                <RotateCcw size={12} />
+                {restoring === rev.id ? "Restaurando…" : "Restaurar"}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PushToGitLabDialog({ repoId, onClose }) {
+  const [token, setToken] = useState("");
+  const [status, setStatus] = useState(null); // null | { ok, pages_pushed, errors }
+  const [pushing, setPushing] = useState(false);
+  const [error, setError] = useState("");
+
+  const handlePush = async () => {
+    if (!token.trim()) { setError("Introduce un PAT con scope api o write_wiki."); return; }
+    setPushing(true);
+    setError("");
+    try {
+      const result = await api.pushToGitLabWiki(repoId, token.trim());
+      setStatus(result);
+    } catch (err) {
+      setError(err.message || "Error al publicar en GitLab Wiki.");
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  return (
+    <div style={styles.revisionOverlay}>
+      <div style={{ ...styles.revisionPanel, maxWidth: 420 }}>
+        <div style={styles.revisionHeader}>
+          <span style={styles.revisionTitle}>Publicar en GitLab Wiki</span>
+          <button onClick={onClose} style={styles.closeBtn}><X size={14} /></button>
+        </div>
+        {status ? (
+          <div style={{ padding: "16px 0" }}>
+            <p style={{ color: "var(--text-primary)", marginBottom: 8 }}>
+              ✓ {status.pages_pushed} página(s) publicadas correctamente.
+            </p>
+            {status.errors.length > 0 && (
+              <div style={styles.revisionError}>
+                Errores: {status.errors.join("; ")}
+              </div>
+            )}
+            <button style={styles.saveButton} onClick={onClose}>Cerrar</button>
+          </div>
+        ) : (
+          <>
+            <p style={styles.revisionInfo}>
+              Introduce un Personal Access Token de GitLab con scope <code>api</code> o <code>write_wiki</code>.
+              Se crearán o actualizarán todas las páginas del wiki generado en el wiki nativo de este repositorio.
+            </p>
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+              style={styles.tokenInput}
+              autoFocus
+            />
+            {error && <div style={styles.revisionError}>{error}</div>}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button style={styles.saveButton} onClick={handlePush} disabled={pushing}>
+                <Upload size={13} />
+                {pushing ? "Publicando…" : "Publicar"}
+              </button>
+              <button style={styles.cancelButton} onClick={onClose} disabled={pushing}>
+                Cancelar
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [showRevisions, setShowRevisions] = useState(false);
+  const [showPushDialog, setShowPushDialog] = useState(false);
 
-  // Exit edit mode whenever the user navigates to a different page.
   useEffect(() => {
     setIsEditing(false);
     setEditedContent("");
     setSaveError("");
+    setShowRevisions(false);
   }, [page?.slug]);
 
   if (!page) return null;
@@ -80,29 +221,46 @@ export function WikiPageContent({ page, onUpdatePage }) {
     setSaveError("");
   };
 
+  const handleRestored = (restoredPage) => {
+    // Bubble up to App so the active page state is updated
+    onUpdatePage?.(restoredPage.slug, restoredPage.content_markdown, restoredPage);
+  };
+
   return (
     <article style={styles.article}>
       <div style={styles.pageHeader}>
         <h1 style={styles.h1}>{page.title}</h1>
-        {onUpdatePage && !isEditing && (
-          <button onClick={handleEditStart} style={styles.editButton} title="Editar página">
-            <Pencil size={14} />
-            Editar
-          </button>
-        )}
-        {isEditing && (
-          <div style={styles.editActions}>
-            {saveError && <span style={styles.saveError}>{saveError}</span>}
-            <button onClick={handleSave} disabled={isSaving} style={styles.saveButton}>
-              <Check size={14} />
-              {isSaving ? "Guardando…" : "Guardar"}
-            </button>
-            <button onClick={handleCancel} disabled={isSaving} style={styles.cancelButton}>
-              <X size={14} />
-              Cancelar
-            </button>
-          </div>
-        )}
+        <div style={styles.pageActions}>
+          {!isEditing && onUpdatePage && (
+            <>
+              <button onClick={() => setShowPushDialog(true)} style={styles.actionButton} title="Publicar en GitLab Wiki">
+                <Upload size={14} />
+                GitLab Wiki
+              </button>
+              <button onClick={() => setShowRevisions(true)} style={styles.actionButton} title="Ver historial de revisiones">
+                <History size={14} />
+                Historial
+              </button>
+              <button onClick={handleEditStart} style={styles.editButton} title="Editar página">
+                <Pencil size={14} />
+                Editar
+              </button>
+            </>
+          )}
+          {isEditing && (
+            <div style={styles.editActions}>
+              {saveError && <span style={styles.saveError}>{saveError}</span>}
+              <button onClick={handleSave} disabled={isSaving} style={styles.saveButton}>
+                <Check size={14} />
+                {isSaving ? "Guardando…" : "Guardar"}
+              </button>
+              <button onClick={handleCancel} disabled={isSaving} style={styles.cancelButton}>
+                <X size={14} />
+                Cancelar
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {isEditing ? (
@@ -114,55 +272,55 @@ export function WikiPageContent({ page, onUpdatePage }) {
           autoFocus
         />
       ) : (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code({ className, children, ...props }) {
-            const match = /language-(\w+)/.exec(className || "");
-            const lang = match?.[1];
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            code({ className, children, ...props }) {
+              const match = /language-(\w+)/.exec(className || "");
+              const lang = match?.[1];
 
-            if (lang === "mermaid") {
-              return <MermaidDiagram code={String(children).trim()} />;
-            }
+              if (lang === "mermaid") {
+                return <MermaidDiagram code={String(children).trim()} />;
+              }
 
-            if (lang) {
+              if (lang) {
+                return (
+                  <SyntaxHighlighter
+                    language={lang}
+                    style={vscDarkPlus}
+                    customStyle={{
+                      borderRadius: 8,
+                      fontSize: 12.5,
+                      border: "1px solid var(--border-subtle)",
+                      margin: "16px 0",
+                    }}
+                  >
+                    {String(children).replace(/\n$/, "")}
+                  </SyntaxHighlighter>
+                );
+              }
+
               return (
-                <SyntaxHighlighter
-                  language={lang}
-                  style={vscDarkPlus}
-                  customStyle={{
-                    borderRadius: 8,
-                    fontSize: 12.5,
-                    border: "1px solid var(--border-subtle)",
-                    margin: "16px 0",
-                  }}
-                >
-                  {String(children).replace(/\n$/, "")}
-                </SyntaxHighlighter>
+                <code style={styles.inlineCode} {...props}>
+                  {children}
+                </code>
               );
-            }
-
-            return (
-              <code style={styles.inlineCode} {...props}>
-                {children}
-              </code>
-            );
-          },
-          h2: (props) => <h2 style={styles.h2} {...props} />,
-          h3: (props) => <h3 style={styles.h3} {...props} />,
-          p: (props) => <p style={styles.p} {...props} />,
-          ul: (props) => <ul style={styles.list} {...props} />,
-          ol: (props) => <ol style={styles.list} {...props} />,
-          li: (props) => <li style={styles.li} {...props} />,
-          a: (props) => <a style={styles.link} {...props} target="_blank" rel="noreferrer" />,
-          blockquote: (props) => <blockquote style={styles.blockquote} {...props} />,
-          table: (props) => <table style={styles.table} {...props} />,
-          th: (props) => <th style={styles.th} {...props} />,
-          td: (props) => <td style={styles.td} {...props} />,
-        }}
-      >
-        {page.content_markdown}
-      </ReactMarkdown>
+            },
+            h2: (props) => <h2 style={styles.h2} {...props} />,
+            h3: (props) => <h3 style={styles.h3} {...props} />,
+            p: (props) => <p style={styles.p} {...props} />,
+            ul: (props) => <ul style={styles.list} {...props} />,
+            ol: (props) => <ol style={styles.list} {...props} />,
+            li: (props) => <li style={styles.li} {...props} />,
+            a: (props) => <a style={styles.link} {...props} target="_blank" rel="noreferrer" />,
+            blockquote: (props) => <blockquote style={styles.blockquote} {...props} />,
+            table: (props) => <table style={styles.table} {...props} />,
+            th: (props) => <th style={styles.th} {...props} />,
+            td: (props) => <td style={styles.td} {...props} />,
+          }}
+        >
+          {page.content_markdown}
+        </ReactMarkdown>
       )}
 
       {page.source_files?.length > 0 && (
@@ -176,6 +334,22 @@ export function WikiPageContent({ page, onUpdatePage }) {
             ))}
           </div>
         </div>
+      )}
+
+      {showRevisions && repositoryId && (
+        <RevisionPanel
+          repoId={repositoryId}
+          slug={page.slug}
+          onRestore={handleRestored}
+          onClose={() => setShowRevisions(false)}
+        />
+      )}
+
+      {showPushDialog && repositoryId && (
+        <PushToGitLabDialog
+          repoId={repositoryId}
+          onClose={() => setShowPushDialog(false)}
+        />
       )}
     </article>
   );
@@ -194,12 +368,30 @@ const styles = {
     gap: 16,
     marginBottom: 28,
   },
+  pageActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    flexShrink: 0,
+    marginTop: 6,
+  },
+  actionButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "5px 10px",
+    fontSize: 12,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-tertiary)",
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 6,
+    cursor: "pointer",
+  },
   editButton: {
     display: "flex",
     alignItems: "center",
     gap: 5,
-    flexShrink: 0,
-    marginTop: 6,
     padding: "5px 12px",
     fontSize: 12,
     fontFamily: "var(--font-mono)",
@@ -213,8 +405,6 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    flexShrink: 0,
-    marginTop: 6,
   },
   saveButton: {
     display: "flex",
@@ -262,6 +452,18 @@ const styles = {
     lineHeight: 1.6,
     boxSizing: "border-box",
     marginBottom: 8,
+  },
+  tokenInput: {
+    width: "100%",
+    padding: "8px 12px",
+    fontSize: 13,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-primary)",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 6,
+    outline: "none",
+    boxSizing: "border-box",
   },
   h1: {
     fontFamily: "var(--font-serif)",
@@ -389,5 +591,116 @@ const styles = {
     borderRadius: 4,
     padding: "3px 8px",
     color: "var(--text-tertiary)",
+  },
+  // Revision panel
+  revisionOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.5)",
+    zIndex: 200,
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "flex-end",
+  },
+  revisionPanel: {
+    width: 380,
+    maxWidth: "90vw",
+    height: "100vh",
+    overflowY: "auto",
+    background: "var(--bg-elevated)",
+    borderLeft: "1px solid var(--border-subtle)",
+    padding: "24px 20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  revisionHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  revisionTitle: {
+    fontSize: 14,
+    fontWeight: 600,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-primary)",
+  },
+  closeBtn: {
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    color: "var(--text-tertiary)",
+    padding: 4,
+  },
+  revisionList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  revisionItem: {
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 6,
+    padding: "10px 12px",
+  },
+  revisionMeta: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  },
+  revisionDate: {
+    fontSize: 11,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-tertiary)",
+  },
+  aiBadge: {
+    fontSize: 9,
+    letterSpacing: "0.06em",
+    fontFamily: "var(--font-mono)",
+    background: "var(--accent-rust)",
+    color: "#fff",
+    borderRadius: 3,
+    padding: "1px 5px",
+  },
+  revisionPreview: {
+    fontSize: 11.5,
+    color: "var(--text-secondary)",
+    fontFamily: "var(--font-serif)",
+    lineHeight: 1.5,
+    marginBottom: 8,
+    whiteSpace: "pre-wrap",
+    overflow: "hidden",
+    maxHeight: 60,
+  },
+  restoreBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 11,
+    fontFamily: "var(--font-mono)",
+    padding: "3px 10px",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    cursor: "pointer",
+    color: "var(--text-secondary)",
+  },
+  revisionInfo: {
+    fontSize: 12,
+    color: "var(--text-tertiary)",
+    fontFamily: "var(--font-serif)",
+    lineHeight: 1.6,
+    marginBottom: 12,
+  },
+  revisionError: {
+    fontSize: 12,
+    color: "var(--accent-red)",
+    fontFamily: "var(--font-mono)",
+    background: "rgba(192,89,74,0.1)",
+    padding: "8px 10px",
+    borderRadius: 4,
+    marginBottom: 8,
   },
 };
