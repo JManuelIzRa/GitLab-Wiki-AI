@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
-  /* --- Paleta: negro cálido con acento óxido (no acid-green, no cream-serif genérico) --- */
+  /* --- Dark theme (default): negro cálido con acento óxido --- */
   --bg-base: #16140F;
   --bg-elevated: #201D17;
   --bg-elevated-2: #2A2620;
@@ -23,6 +23,28 @@
   --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
 
   color-scheme: dark;
+}
+
+/* --- Light theme --- */
+[data-theme="light"] {
+  --bg-base: #F7F3EC;
+  --bg-elevated: #EDE8DC;
+  --bg-elevated-2: #E2DAC8;
+  --bg-hover: #D8CEB8;
+  --border-subtle: #C8BCA8;
+  --border-strong: #A89C88;
+
+  --text-primary: #1A150C;
+  --text-secondary: #4A4030;
+  --text-tertiary: #7A7060;
+
+  --accent-rust: #A05A28;
+  --accent-rust-dim: #C87A44;
+  --accent-sage: #4A7A5A;
+  --accent-sage-dim: #2E5240;
+  --accent-red: #A03828;
+
+  color-scheme: light;
 }
 
 * {
@@ -78,6 +100,11 @@ button {
   outline: 2px solid var(--accent-rust);
   outline-offset: 2px;
   border-radius: 2px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
