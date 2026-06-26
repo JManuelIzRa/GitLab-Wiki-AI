@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import AsyncGenerator
 
@@ -47,7 +48,13 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "- Responde SIEMPRE en español, en formato Markdown limpio (sin envolver todo en bloques de código).\n"
             "- Usa encabezados (##, ###), listas y bloques de código con el lenguaje correcto cuando muestres código.\n"
             "- Si necesitas representar un flujo o arquitectura, usa un bloque ```mermaid``` con un diagrama válido "
-            "(flowchart, sequenceDiagram o classDiagram).\n"
+            "(flowchart, sequenceDiagram o classDiagram). Reglas de sintaxis Mermaid obligatorias:\n"
+            "  · Los IDs de nodo solo admiten letras, dígitos y guiones bajos — nunca espacios, puntos, barras ni paréntesis.\n"
+            "  · Las etiquetas con espacios o caracteres especiales DEBEN ir entre comillas dobles: A[\"Mi Módulo\"].\n"
+            "  · Nunca uses () en el ID de un nodo — Mermaid los interpreta como formas de estadio.\n"
+            "  · Máximo 14 nodos por diagrama. Usa subgraph para agrupar capas (frontend, backend, db…).\n"
+            "  · Prefiere flowchart TD para arquitecturas jerárquicas y flowchart LR para pipelines lineales.\n"
+            "  · No anides bloques de código dentro del bloque mermaid.\n"
             "- Basa tus afirmaciones únicamente en el código y archivos proporcionados. Si algo no es evidente "
             "en el contexto dado, dilo explícitamente en vez de inventarlo.\n"
             "- Sé concreto: nombra archivos, funciones y rutas reales que aparezcan en el contexto.\n"
@@ -86,8 +93,9 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "Escribe una página de arquitectura que explique cómo se relacionan estos módulos entre sí, "
             "cuál parece ser el flujo principal de la aplicación, y dónde está cada responsabilidad "
             "(ej. API, lógica de negocio, acceso a datos, frontend, infraestructura). "
-            "Incluye un diagrama ```mermaid``` tipo flowchart que represente la arquitectura de alto nivel "
-            "inferida de estos módulos."
+            "Incluye un diagrama ```mermaid``` tipo flowchart TD que represente la arquitectura de alto nivel. "
+            "Usa subgraph para agrupar módulos por capa (p.ej. subgraph Frontend, subgraph Backend). "
+            "Nodos con etiquetas entre comillas dobles, IDs solo alfanuméricos, máximo 14 nodos."
         ),
         "module": (
             "Genera la página de wiki para el módulo `{module_path}` del proyecto `{project_name}`.\n\n"
@@ -146,7 +154,13 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "- Always respond in English, in clean Markdown format (do not wrap everything in code blocks).\n"
             "- Use headings (##, ###), lists, and code blocks with the correct language when showing code.\n"
             "- If you need to represent a flow or architecture, use a ```mermaid``` block with a valid diagram "
-            "(flowchart, sequenceDiagram, or classDiagram).\n"
+            "(flowchart, sequenceDiagram, or classDiagram). Mandatory Mermaid syntax rules:\n"
+            "  · Node IDs must use only letters, digits, and underscores — no spaces, dots, slashes, hyphens, or parentheses.\n"
+            "  · Labels with spaces or special characters MUST be quoted: A[\"My Module\"].\n"
+            "  · Never use () in a node ID — Mermaid interprets them as stadium shapes.\n"
+            "  · Keep diagrams concise: maximum 14 nodes. Use subgraph to group layers (frontend, backend, db…).\n"
+            "  · Prefer flowchart TD for hierarchical architectures and flowchart LR for linear pipelines.\n"
+            "  · Do not nest code fences inside the mermaid block.\n"
             "- Base your statements only on the code and files provided. If something is not evident in the "
             "given context, say so explicitly instead of making it up.\n"
             "- Be concrete: name real files, functions, and paths that appear in the context.\n"
@@ -185,8 +199,9 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "Write an architecture page explaining how these modules relate to each other, "
             "what the main application flow appears to be, and where each responsibility lives "
             "(e.g. API, business logic, data access, frontend, infrastructure). "
-            "Include a ```mermaid``` flowchart diagram representing the high-level architecture "
-            "inferred from these modules."
+            "Include a ```mermaid``` flowchart TD diagram representing the high-level architecture. "
+            "Use subgraph to group modules by layer (e.g. subgraph Frontend, subgraph Backend). "
+            "Node labels in double quotes, IDs alphanumeric only, maximum 14 nodes."
         ),
         "module": (
             "Generate the wiki page for module `{module_path}` of project `{project_name}`.\n\n"
@@ -261,6 +276,26 @@ def _get_prompts(language: str) -> dict[str, str]:
 class FileSnippet:
     path: str
     content: str
+
+
+def _sanitize_mermaid_blocks(content: str) -> str:
+    """Post-process LLM output to fix the most common Mermaid syntax errors in generated blocks."""
+    def _fix(m: re.Match) -> str:
+        code = m.group(1)
+        # Strip any nested backtick fences the LLM accidentally inserts
+        code = re.sub(r"```+\w*", "", code)
+        # Normalize line endings
+        code = code.replace("\r\n", "\n").replace("\r", "\n")
+        # Decode common HTML entities that break the Mermaid parser
+        code = (code
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", '"')
+                .replace("&#39;", "'"))
+        return f"```mermaid\n{code.strip()}\n```"
+
+    return re.sub(r"```mermaid\n(.*?)```", _fix, content, flags=re.DOTALL)
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -366,7 +401,7 @@ class WikiGenerator:
             dependency_manifests=", ".join(structure.dependency_manifests) or "none",
             readme=_truncate(readme_content or "(no README found)", settings.max_chars_per_ai_call),
         )
-        return await self._ask(prompt, system_prompt_override=system_prompt_override)
+        return _sanitize_mermaid_blocks(await self._ask(prompt, system_prompt_override=system_prompt_override))
 
     async def generate_architecture(
         self, project_name: str, structure: RepoStructure,
@@ -384,7 +419,7 @@ class WikiGenerator:
             entrypoints=entrypoints,
             config_files=", ".join(structure.config_files) or "none",
         )
-        return await self._ask(prompt, system_prompt_override=system_prompt_override)
+        return _sanitize_mermaid_blocks(await self._ask(prompt, system_prompt_override=system_prompt_override))
 
     async def generate_module_page(
         self, project_name: str, module: ModuleInfo, snippets: list[FileSnippet],
@@ -398,7 +433,7 @@ class WikiGenerator:
             languages=", ".join(module.languages) or "n/a",
             files_context=files_context,
         )
-        return await self._ask(prompt, system_prompt_override=system_prompt_override)
+        return _sanitize_mermaid_blocks(await self._ask(prompt, system_prompt_override=system_prompt_override))
 
     async def generate_setup_guide(
         self,
@@ -416,7 +451,7 @@ class WikiGenerator:
             manifests_context=manifests_context or "(no readable manifests found)",
             readme=_truncate(readme_content or "(no README)", 4000),
         )
-        return await self._ask(prompt, system_prompt_override=system_prompt_override)
+        return _sanitize_mermaid_blocks(await self._ask(prompt, system_prompt_override=system_prompt_override))
 
     # ------------------------------------------------------------------
     # RAG chat — non-streaming and streaming variants
@@ -520,7 +555,7 @@ class WikiGenerator:
             repo_count=len(repo_summaries),
             repo_summaries=summaries_text or "(no repos with generated wikis yet)",
         )
-        return await self._ask(prompt, max_tokens=settings.max_chat_tokens)
+        return _sanitize_mermaid_blocks(await self._ask(prompt, max_tokens=settings.max_chat_tokens))
 
     async def answer_group_question_rag(
         self,
