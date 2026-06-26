@@ -17,11 +17,14 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
 from app.db.session import AsyncSessionLocal
 from app.models.db_models import (
     GitLabGroup,
     GroupIndexJob,
     GroupIndexStatus,
+    GroupMembership,
     GroupRepoStatus,
     IndexJob,
     JobStatus,
@@ -93,15 +96,22 @@ async def _index_single_repo(
                         project_path=project_path,
                         project_id="",
                         name=project_path.split("/")[-1],
-                        group_id=group_id,
+                        group_id=group_id,  # primary group hint (cosmetic)
                     )
                     session.add(repo)
                     await session.commit()
                     await session.refresh(repo)
                 else:
                     repo = existing
-                    repo.group_id = group_id
                     await session.commit()
+
+                # Add membership (INSERT OR IGNORE so existing links survive).
+                await session.execute(
+                    sqlite_insert(GroupMembership)
+                    .values(group_id=group_id, repository_id=repo.id)
+                    .on_conflict_do_nothing(index_elements=["group_id", "repository_id"])
+                )
+                await session.commit()
 
                 index_job = IndexJob(
                     repository_id=repo.id,

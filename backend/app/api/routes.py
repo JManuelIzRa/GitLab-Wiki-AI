@@ -53,7 +53,7 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.db.session import AsyncSessionLocal, get_session
 from app.models.db_models import (
-    GitLabGroup, GroupIndexJob, GroupIndexStatus, GroupRepoStatus,
+    GitLabGroup, GroupIndexJob, GroupIndexStatus, GroupMembership, GroupRepoStatus,
     IndexJob, JobStatus, Repository, WikiCache, WikiPage, WikiPageRevision,
 )
 from app.models.schemas import (
@@ -904,7 +904,10 @@ async def get_group(group_id: int, session: AsyncSession = Depends(get_session))
         raise HTTPException(status_code=404, detail="Grupo no encontrado")
     repos = (
         await session.execute(
-            select(Repository).where(Repository.group_id == group_id).order_by(Repository.name)
+            select(Repository)
+            .join(GroupMembership, GroupMembership.repository_id == Repository.id)
+            .where(GroupMembership.group_id == group_id)
+            .order_by(Repository.name)
         )
     ).scalars().all()
     return GroupDetail(
@@ -1037,8 +1040,10 @@ async def cross_repo_search(
         repo_ids = list(
             (
                 await session.execute(
-                    select(Repository.id).where(
-                        Repository.group_id == group_id,
+                    select(Repository.id)
+                    .join(GroupMembership, GroupMembership.repository_id == Repository.id)
+                    .where(
+                        GroupMembership.group_id == group_id,
                         Repository.indexed_in_qdrant == True,  # noqa: E712
                     )
                 )
@@ -1097,18 +1102,22 @@ async def group_chat(
     if group is None:
         raise HTTPException(status_code=404, detail="Grupo no encontrado")
 
-    repo_ids = list(
+    member_repo_ids = list(
         (
             await session.execute(
-                select(Repository.id).where(Repository.group_id == group_id)
+                select(Repository.id)
+                .join(GroupMembership, GroupMembership.repository_id == Repository.id)
+                .where(GroupMembership.group_id == group_id)
             )
         ).scalars().all()
     )
     qdrant_repo_ids = list(
         (
             await session.execute(
-                select(Repository.id).where(
-                    Repository.group_id == group_id,
+                select(Repository.id)
+                .join(GroupMembership, GroupMembership.repository_id == Repository.id)
+                .where(
+                    GroupMembership.group_id == group_id,
                     Repository.indexed_in_qdrant == True,  # noqa: E712
                 )
             )
@@ -1117,7 +1126,7 @@ async def group_chat(
     repo_names = list(
         (
             await session.execute(
-                select(Repository.name).where(Repository.id.in_(repo_ids))
+                select(Repository.name).where(Repository.id.in_(member_repo_ids))
             )
         ).scalars().all()
     )
@@ -1178,8 +1187,10 @@ async def stream_group_chat(
     qdrant_repo_ids = list(
         (
             await session.execute(
-                select(Repository.id).where(
-                    Repository.group_id == group_id,
+                select(Repository.id)
+                .join(GroupMembership, GroupMembership.repository_id == Repository.id)
+                .where(
+                    GroupMembership.group_id == group_id,
                     Repository.indexed_in_qdrant == True,  # noqa: E712
                 )
             )
@@ -1188,7 +1199,9 @@ async def stream_group_chat(
     repo_names = list(
         (
             await session.execute(
-                select(Repository.name).where(Repository.group_id == group_id)
+                select(Repository.name)
+                .join(GroupMembership, GroupMembership.repository_id == Repository.id)
+                .where(GroupMembership.group_id == group_id)
             )
         ).scalars().all()
     )
@@ -1255,15 +1268,11 @@ async def get_group_dependency_graph(group_id: int, session: AsyncSession = Depe
 
 @router.delete("/groups/{group_id}")
 async def delete_group(group_id: int, session: AsyncSession = Depends(get_session)):
-    """Deletes the group record. Repositories lose their group_id but are kept."""
+    """Deletes the group record and its memberships. Repositories themselves are kept."""
     group = await session.get(GitLabGroup, group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Grupo no encontrado")
-    # Disassociate repos before deleting the group (FK SET NULL handles this at DB level
-    # but SQLAlchemy ORM needs the flush too).
-    await session.execute(
-        select(Repository).where(Repository.group_id == group_id)
-    )
+    # GroupMembership rows are CASCADE-deleted by the DB FK.
     await session.delete(group)
     await session.commit()
     return {"ok": True}

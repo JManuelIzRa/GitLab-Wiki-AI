@@ -94,6 +94,17 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS ix_group_repo_statuses_job ON group_repo_statuses (group_job_id)",
     "ALTER TABLE repositories ADD COLUMN group_id INTEGER DEFAULT NULL REFERENCES gitlab_groups(id) ON DELETE SET NULL",
     "CREATE INDEX IF NOT EXISTS ix_repositories_group ON repositories (group_id)",
+    # Many-to-many group ↔ repo memberships (replaces single FK for cross-group repos)
+    (
+        "CREATE TABLE IF NOT EXISTS group_memberships ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  group_id INTEGER NOT NULL REFERENCES gitlab_groups(id) ON DELETE CASCADE,"
+        "  repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,"
+        "  UNIQUE(group_id, repository_id)"
+        ")"
+    ),
+    "CREATE INDEX IF NOT EXISTS ix_group_memberships_group ON group_memberships (group_id)",
+    "CREATE INDEX IF NOT EXISTS ix_group_memberships_repo ON group_memberships (repository_id)",
 ]
 
 

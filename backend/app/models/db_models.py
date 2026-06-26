@@ -83,6 +83,23 @@ class GroupIndexJob(Base):
     )
 
 
+class GroupMembership(Base):
+    """Many-to-many link between GitLabGroup and Repository.
+
+    A repository can belong to multiple groups (e.g. a shared library indexed
+    under both group-a and group-b). This table replaces the single group_id FK
+    on Repository for all cross-group queries.
+    """
+    __tablename__ = "group_memberships"
+    __table_args__ = (
+        UniqueConstraint("group_id", "repository_id", name="uq_group_membership"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("gitlab_groups.id", ondelete="CASCADE"), index=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"), index=True)
+
+
 class GroupRepoStatus(Base):
     """Per-repo progress record within a single GroupIndexJob."""
     __tablename__ = "group_repo_statuses"
