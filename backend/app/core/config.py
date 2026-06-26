@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 32     # chunks por llamada al servicio de embeddings
     max_files_to_embed: int = 300      # tope de archivos de código indexados en Qdrant
     fetch_concurrency: int = 15        # peticiones HTTP paralelas al fetchar archivos del repo
+    # Concurrent LLM calls during module page generation. Keep low (2-3) for local models
+    # that don't pipeline well; raise to 6-10 when using a cloud API.
+    max_concurrent_module_generations: int = 3
 
     # --- Cache local de modelos HuggingFace ---
     models_cache_dir: str = str(Path.home() / ".cache" / "deepwiki" / "models")

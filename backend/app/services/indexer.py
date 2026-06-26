@@ -153,14 +153,14 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
             ))
             order_counter += 1
 
-            # --- 7. Páginas por módulo principal ---
+            # --- 7. Páginas por módulo principal (generadas en paralelo) ---
             top_modules = [m for m in structure.modules if m.path != "."][:settings.max_module_pages]
-            progress_per_module = 15 // max(len(top_modules), 1)
-            current_progress = 60
+            await _update_job(session, job, progress=60,
+                               step=f"Generando {len(top_modules)} páginas de módulo en paralelo...")
 
-            for module in top_modules:
-                await _update_job(session, job, progress=current_progress, step=f"Generando página del módulo: {module.path}...")
+            _llm_sem = asyncio.Semaphore(settings.max_concurrent_module_generations)
 
+            async def _process_module(module) -> WikiPage | None:
                 sample_paths = module.sample_files[:settings.sample_files_per_module]
                 sample_contents = await asyncio.gather(
                     *[client.get_file_content(project.id, fp, target_branch) for fp in sample_paths]
@@ -170,18 +170,24 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                     for fp, c in zip(sample_paths, sample_contents)
                     if c
                 ]
-
-                if snippets:
+                if not snippets:
+                    return None
+                async with _llm_sem:
                     module_md = await generator.generate_module_page(project.name, module, snippets)
-                    slug = "module-" + module.path.replace("/", "-").lower()
-                    new_pages.append(WikiPage(
-                        repository_id=repo.id, slug=slug, title=f"Módulo: {module.path}", order=order_counter,
-                        parent_slug="modules", content_markdown=module_md,
-                        source_files=[s.path for s in snippets],
-                    ))
-                    order_counter += 1
+                slug = "module-" + module.path.replace("/", "-").lower()
+                return WikiPage(
+                    repository_id=repo.id, slug=slug, title=f"Módulo: {module.path}",
+                    order=0,  # filled in below after sorting
+                    parent_slug="modules", content_markdown=module_md,
+                    source_files=[s.path for s in snippets],
+                )
 
-                current_progress += progress_per_module
+            module_pages = await asyncio.gather(*[_process_module(m) for m in top_modules])
+            for page in module_pages:
+                if page is not None:
+                    page.order = order_counter
+                    new_pages.append(page)
+                    order_counter += 1
 
             # --- 8. Página: Cómo ejecutar el proyecto ---
             await _update_job(session, job, progress=80, step="Generando página: Cómo ejecutar el proyecto...")

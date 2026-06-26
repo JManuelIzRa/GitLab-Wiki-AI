@@ -15,14 +15,17 @@ Convención de rutas:
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 
 import openai
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_session
+from app.db.session import AsyncSessionLocal, get_session
 from app.models.db_models import IndexJob, JobStatus, Repository, WikiPage
 from app.models.schemas import (
     ChatRequest, ChatResponse, CodeSearchRequest, CodeSearchResponse, CodeSource,
@@ -99,6 +102,46 @@ async def get_job_status(job_id: int, session: AsyncSession = Depends(get_sessio
     return IndexJobResponse(
         job_id=job.id, repository_id=job.repository_id, status=job.status,
         progress=job.progress, current_step=job.current_step, error_message=job.error_message,
+    )
+
+
+@router.get("/jobs/{job_id}/stream")
+async def stream_job_status(job_id: int):
+    """
+    SSE endpoint that pushes job progress updates until the job reaches a terminal state.
+    Each event is a JSON-encoded IndexJobResponse. The connection closes automatically
+    when the job is done or failed — no client-side polling needed.
+    Falls back gracefully: if the client loses the connection, the generator exits cleanly.
+    """
+    async def event_generator():
+        last_key: tuple | None = None
+        while True:
+            async with AsyncSessionLocal() as session:
+                job = await session.get(IndexJob, job_id)
+                if job is None:
+                    yield f"data: {json.dumps({'error': 'Job no encontrado'})}\n\n"
+                    return
+
+                current_key = (job.status, job.progress, job.current_step)
+                if current_key != last_key:
+                    last_key = current_key
+                    payload = IndexJobResponse(
+                        job_id=job.id, repository_id=job.repository_id, status=job.status,
+                        progress=job.progress, current_step=job.current_step,
+                        error_message=job.error_message,
+                    )
+                    yield f"data: {payload.model_dump_json()}\n\n"
+
+                terminal = job.status in (JobStatus.DONE.value, JobStatus.FAILED.value)
+
+            if terminal:
+                return
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

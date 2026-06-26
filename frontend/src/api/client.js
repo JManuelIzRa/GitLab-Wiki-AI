@@ -3,7 +3,7 @@
  * Centralises the base URL, error handling, and retry logic (up to 2 retries
  * with exponential backoff on 5xx responses and network failures).
  */
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 class ApiError extends Error {
   constructor(message, status) {

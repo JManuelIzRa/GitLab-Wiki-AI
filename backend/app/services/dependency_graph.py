@@ -2,58 +2,171 @@
 Construcción de un grafo de dependencias entre módulos, a partir de imports/requires
 reales detectados en el código (no solo agrupación por carpeta como structure_analyzer).
 
-Estrategia: regex por lenguaje en vez de un parser AST completo por cada uno — más simple
-de mantener, funciona razonablemente bien para los casos comunes (import relativo o de
-paquete interno) y es lo único viable sin añadir un parser por lenguaje al proyecto.
-Los imports a paquetes externos (de node_modules, pip, etc.) se descartan: solo nos
-interesan las dependencias INTERNAS entre módulos del propio repo, que es lo que tiene
-valor visualizar.
+Estrategia: tree-sitter AST para Python, JavaScript y TypeScript — más preciso que regex
+porque no captura imports comentados ni strings fuera de contexto import/require.
+Fallback a regex para Go y Java donde la sintaxis es simple y unívoca, y como red de
+seguridad si el parser tree-sitter no está disponible para algún lenguaje.
 
 El grafo resultante es a nivel de MÓDULO (primer directorio del path), no de archivo
 individual — un grafo de cientos de archivos sería ilegible; uno de 5-15 módulos es útil.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 
-# Patrones de import por lenguaje. Cada patrón captura el "destino" del import como grupo 1.
-# Deliberadamente simples: priorizan no fallar sobre cubrir el 100% de la sintaxis del lenguaje.
-IMPORT_PATTERNS: dict[str, list[re.Pattern]] = {
-    "JavaScript": [
-        re.compile(r"""require\(\s*['"](\.{1,2}/[^'"]+)['"]\s*\)"""),
-        re.compile(r"""from\s+['"](\.{1,2}/[^'"]+)['"]"""),
-        re.compile(r"""import\(\s*['"](\.{1,2}/[^'"]+)['"]\s*\)"""),
-    ],
-    "TypeScript": [
-        re.compile(r"""from\s+['"](\.{1,2}/[^'"]+)['"]"""),
-        re.compile(r"""import\(\s*['"](\.{1,2}/[^'"]+)['"]\s*\)"""),
-    ],
-    "Python": [
-        re.compile(r"^\s*from\s+(\.{1,2}[\w.]*)\s+import", re.MULTILINE),
-        re.compile(r"^\s*from\s+([\w]+(?:\.[\w]+)*)\s+import", re.MULTILINE),
-        re.compile(r"^\s*import\s+([\w]+(?:\.[\w]+)*)", re.MULTILINE),
-    ],
-    "Go": [
-        re.compile(r'"([\w.\-]+/[\w./\-]+)"'),
-    ],
-    "Java": [
-        re.compile(r"^\s*import\s+(?:static\s+)?([\w]+(?:\.[\w]+)*);", re.MULTILINE),
-    ],
+logger = logging.getLogger(__name__)
+
+# --- Regex fallback para Go y Java ---
+_IMPORT_PATTERNS_REGEX: dict[str, list[re.Pattern]] = {
+    "Go": [re.compile(r'"([\w.\-]+/[\w./\-]+)"')],
+    "Java": [re.compile(r"^\s*import\s+(?:static\s+)?([\w]+(?:\.[\w]+)*);", re.MULTILINE)],
 }
+
+# Mapping from our language names to tree-sitter language identifiers
+_TS_LANGUAGE_MAP: dict[str, str] = {
+    "Python": "python",
+    "JavaScript": "javascript",
+    "TypeScript": "typescript",
+}
+
+# Cached parsers — one per tree-sitter language, None if unavailable
+_ts_parser_cache: dict[str, object] = {}
+
+
+def _get_ts_parser(ts_lang_name: str):
+    """Returns a cached tree-sitter Parser for ts_lang_name, or None if unavailable."""
+    if ts_lang_name in _ts_parser_cache:
+        return _ts_parser_cache[ts_lang_name]
+
+    parser = None
+    try:
+        from tree_sitter import Language, Parser
+        if ts_lang_name == "python":
+            import tree_sitter_python
+            lang = Language(tree_sitter_python.language())
+        elif ts_lang_name == "javascript":
+            import tree_sitter_javascript
+            lang = Language(tree_sitter_javascript.language())
+        elif ts_lang_name == "typescript":
+            import tree_sitter_typescript
+            lang = Language(tree_sitter_typescript.language_typescript())
+        else:
+            _ts_parser_cache[ts_lang_name] = None
+            return None
+        parser = Parser(lang)
+    except Exception:
+        logger.debug("tree-sitter parser unavailable for %s; falling back to regex", ts_lang_name)
+
+    _ts_parser_cache[ts_lang_name] = parser
+    return parser
+
+
+def _extract_python_imports(root_node) -> list[str]:
+    """
+    Walk a Python AST and return all module names referenced by import/from-import
+    statements as dotted strings (e.g. 'app.services.indexer', '.utils', '..helpers').
+    Relative imports preserve the leading dots so the resolver can tell them apart.
+    """
+    results: list[str] = []
+
+    def walk(node):
+        if node.type == "import_statement":
+            for child in node.children:
+                if child.type == "dotted_name":
+                    results.append(child.text.decode("utf-8", errors="replace"))
+                elif child.type == "aliased_import":
+                    for gc in child.children:
+                        if gc.type == "dotted_name":
+                            results.append(gc.text.decode("utf-8", errors="replace"))
+                            break
+        elif node.type == "import_from_statement":
+            # Take only the first module-identifying child and stop.
+            for child in node.children:
+                if child.type == "dotted_name":
+                    results.append(child.text.decode("utf-8", errors="replace"))
+                    break
+                elif child.type == "relative_import":
+                    dots = ""
+                    name = ""
+                    for gc in child.children:
+                        if gc.type == "import_prefix":
+                            dots = gc.text.decode("utf-8", errors="replace")
+                        elif gc.type == "dotted_name":
+                            name = gc.text.decode("utf-8", errors="replace")
+                    results.append(dots + name)
+                    break
+        for child in node.children:
+            walk(child)
+
+    walk(root_node)
+    return results
+
+
+def _extract_js_ts_imports(root_node) -> list[str]:
+    """
+    Walk a JS/TS AST and return all import source strings found in:
+    - ES6 import statements:  import { x } from './foo'
+    - CommonJS require calls: const x = require('./foo')
+    - Dynamic imports:        import('./foo')
+    """
+    results: list[str] = []
+
+    def _string_fragment(node) -> str | None:
+        for child in node.children:
+            if child.type == "string_fragment":
+                return child.text.decode("utf-8", errors="replace")
+        return None
+
+    def walk(node):
+        if node.type == "import_statement":
+            for child in node.children:
+                if child.type == "string":
+                    frag = _string_fragment(child)
+                    if frag:
+                        results.append(frag)
+        elif node.type == "call_expression":
+            children = node.children
+            if not children:
+                pass
+            else:
+                callee = children[0]
+                if callee.type == "identifier" and callee.text == b"require":
+                    args = node.child_by_field_name("arguments")
+                    if args:
+                        for arg in args.children:
+                            if arg.type == "string":
+                                frag = _string_fragment(arg)
+                                if frag:
+                                    results.append(frag)
+                elif callee.type == "import":
+                    # dynamic import(...)
+                    args = node.child_by_field_name("arguments")
+                    if args:
+                        for arg in args.children:
+                            if arg.type == "string":
+                                frag = _string_fragment(arg)
+                                if frag:
+                                    results.append(frag)
+        for child in node.children:
+            walk(child)
+
+    walk(root_node)
+    return results
 
 
 @dataclass
 class ModuleEdge:
     source: str
     target: str
-    weight: int = 1  # nº de imports detectados entre estos dos módulos (más imports = línea más gruesa)
+    weight: int = 1  # number of import references between these two modules
 
 
 @dataclass
 class DependencyGraph:
-    nodes: list[str] = field(default_factory=list)   # nombres de módulo (primer directorio)
+    nodes: list[str] = field(default_factory=list)
     edges: list[ModuleEdge] = field(default_factory=list)
 
 
@@ -73,7 +186,7 @@ def _compute_module_depth(known_paths: set[str]) -> int:
 
 
 def _module_of(path: str, depth: int = 1) -> str:
-    """Primeros `depth` directorios significativos del path."""
+    """First `depth` directory segments of a path."""
     parts = path.split("/")
     if len(parts) <= 1:
         return "."
@@ -82,9 +195,8 @@ def _module_of(path: str, depth: int = 1) -> str:
 
 def _resolve_relative_import(importer_path: str, import_target: str) -> str | None:
     """
-    Resuelve un import relativo de JS/TS (ej. '../utils/foo') a un path normalizado
-    dentro del repo, para poder saber a qué módulo apunta. Devuelve None si no se
-    puede resolver razonablemente (ej. apunta fuera del repo).
+    Resolve a JS/TS relative import (e.g. '../utils/foo') to a normalised repo-relative
+    path. Returns None if the result escapes the repo root.
     """
     importer_dir = os.path.dirname(importer_path)
     resolved = os.path.normpath(os.path.join(importer_dir, import_target))
@@ -93,79 +205,110 @@ def _resolve_relative_import(importer_path: str, import_target: str) -> str | No
     return resolved.replace("\\", "/")
 
 
-def _detect_internal_imports(file_path: str, content: str, language: str,
-                              known_paths: set[str]) -> list[str]:
+def _resolve_to_known_paths(
+    raw_targets: list[str], language: str, file_path: str, known_paths: set[str]
+) -> list[str]:
     """
-    Devuelve la lista de paths del repo (no de módulo todavía) a los que `file_path`
-    importa, filtrando cualquier cosa que no se pueda resolver a un archivo conocido
-    del propio repo (es decir, descarta dependencias externas).
+    Map raw import strings (module names or relative paths) to actual file paths that
+    exist in the repo, discarding external packages.
     """
-    patterns = IMPORT_PATTERNS.get(language, [])
-    targets: list[str] = []
+    matched: list[str] = []
 
-    for pattern in patterns:
-        for match in pattern.finditer(content):
-            raw_target = match.group(1)
+    for raw in raw_targets:
+        if language in ("JavaScript", "TypeScript"):
+            if not raw.startswith("."):
+                continue  # external npm package
+            resolved = _resolve_relative_import(file_path, raw)
+            if resolved is None:
+                continue
+            candidates = [
+                resolved, resolved + ".js", resolved + ".ts",
+                resolved + ".jsx", resolved + ".tsx",
+                resolved + "/index.js", resolved + "/index.ts",
+            ]
+            hit = next((c for c in candidates if c in known_paths), None)
+            if hit:
+                matched.append(hit)
 
-            if language in ("JavaScript", "TypeScript"):
-                resolved = _resolve_relative_import(file_path, raw_target)
-                if resolved is None:
-                    continue
-                candidates = [
-                    resolved, resolved + ".js", resolved + ".ts", resolved + ".jsx", resolved + ".tsx",
-                    resolved + "/index.js", resolved + "/index.ts",
-                ]
-                match_found = next((c for c in candidates if c in known_paths), None)
-                if match_found:
-                    targets.append(match_found)
-
-            elif language == "Python":
-                dotted = raw_target.lstrip(".")
-                if not dotted:
-                    continue
-                # Convertimos el dotted path completo a una ruta candidata real
-                # (ej. 'app.services.indexer' -> 'app/services/indexer.py'), y vamos
-                # recortando componentes desde el final hasta encontrar un archivo conocido
-                # del repo. Esto resuelve tanto 'from app.services.indexer import X'
-                # (módulo exacto) como 'from app.services import X' (paquete/__init__).
-                components = dotted.split(".")
-                match_found = None
-                for cut in range(len(components), 0, -1):
-                    candidate_base = "/".join(components[:cut])
-                    candidates = [candidate_base + ".py", candidate_base + "/__init__.py"]
-                    match_found = next((c for c in candidates if c in known_paths), None)
-                    if match_found:
+        elif language == "Python":
+            dotted = raw.lstrip(".")
+            if not dotted:
+                continue
+            components = dotted.split(".")
+            hit = None
+            for cut in range(len(components), 0, -1):
+                base = "/".join(components[:cut])
+                for suffix in (".py", "/__init__.py"):
+                    if base + suffix in known_paths:
+                        hit = base + suffix
                         break
-                if match_found:
-                    targets.append(match_found)
+                if hit:
+                    break
+            if hit:
+                matched.append(hit)
 
-            elif language == "Go":
-                last_segment = raw_target.split("/")[-1]
-                candidate_paths = [p for p in known_paths if p.split("/")[0] == last_segment]
-                targets.extend(candidate_paths[:1])
+        elif language == "Go":
+            last_segment = raw.split("/")[-1]
+            candidates = [p for p in known_paths if p.split("/")[0] == last_segment]
+            matched.extend(candidates[:1])
 
-            elif language == "Java":
-                first_component = raw_target.split(".")[0]
-                candidate_paths = [p for p in known_paths if p.split("/")[0] == first_component]
-                targets.extend(candidate_paths[:1])
+        elif language == "Java":
+            first_component = raw.split(".")[0]
+            candidates = [p for p in known_paths if p.split("/")[0] == first_component]
+            matched.extend(candidates[:1])
 
-    return targets
+    return matched
 
 
-def build_dependency_graph(file_contents: dict[str, str], languages_by_path: dict[str, str]) -> DependencyGraph:
+def _detect_internal_imports(
+    file_path: str, content: str, language: str, known_paths: set[str]
+) -> list[str]:
     """
-    file_contents: {path: contenido} de los archivos de código ya leídos.
-    languages_by_path: {path: nombre de lenguaje} (ej. "JavaScript"), para saber qué
-    patrones de import aplicar a cada archivo.
+    Returns repo file paths that file_path imports from.
+    Uses tree-sitter AST for Python/JS/TS; regex for Go/Java; regex fallback on parse failure.
+    """
+    raw_targets: list[str] = []
+    used_tree_sitter = False
+
+    ts_lang_name = _TS_LANGUAGE_MAP.get(language)
+    if ts_lang_name:
+        parser = _get_ts_parser(ts_lang_name)
+        if parser:
+            try:
+                tree = parser.parse(content.encode("utf-8", errors="replace"))
+                if language == "Python":
+                    raw_targets = _extract_python_imports(tree.root_node)
+                else:
+                    raw_targets = _extract_js_ts_imports(tree.root_node)
+                used_tree_sitter = True
+            except Exception:
+                logger.debug("tree-sitter parse failed for %s; using regex fallback", file_path)
+
+    if not used_tree_sitter:
+        for pattern in _IMPORT_PATTERNS_REGEX.get(language, []):
+            for m in pattern.finditer(content):
+                raw_targets.append(m.group(1))
+
+    return _resolve_to_known_paths(raw_targets, language, file_path, known_paths)
+
+
+def build_dependency_graph(
+    file_contents: dict[str, str], languages_by_path: dict[str, str]
+) -> DependencyGraph:
+    """
+    file_contents: {path: content} of already-fetched code files.
+    languages_by_path: {path: language name} (e.g. "Python"), to select the right parser.
     """
     known_paths = set(file_contents.keys())
     depth = _compute_module_depth(known_paths)
     edge_weights: dict[tuple[str, str], int] = {}
     modules_seen: set[str] = set()
 
+    _supported = {"JavaScript", "TypeScript", "Python", "Go", "Java"}
+
     for path, content in file_contents.items():
         language = languages_by_path.get(path)
-        if not language or language not in IMPORT_PATTERNS:
+        if not language or language not in _supported:
             continue
 
         source_module = _module_of(path, depth)
@@ -182,5 +325,4 @@ def build_dependency_graph(file_contents: dict[str, str], languages_by_path: dic
 
     edges = [ModuleEdge(source=s, target=t, weight=w) for (s, t), w in edge_weights.items()]
     edges.sort(key=lambda e: e.weight, reverse=True)
-
     return DependencyGraph(nodes=sorted(modules_seen), edges=edges)
