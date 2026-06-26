@@ -1,4 +1,57 @@
 import { useCallback, useEffect, useState } from "react";
+
+// ---------------------------------------------------------------------------
+// Page loading skeleton
+// ---------------------------------------------------------------------------
+
+function PageSkeleton() {
+  return (
+    <div style={skeletonStyles.article}>
+      <div style={{ ...skeletonStyles.block, width: "55%", height: 36, marginBottom: 28 }} />
+      <div style={{ ...skeletonStyles.block, width: "100%", height: 14, marginBottom: 10 }} />
+      <div style={{ ...skeletonStyles.block, width: "92%", height: 14, marginBottom: 10 }} />
+      <div style={{ ...skeletonStyles.block, width: "80%", height: 14, marginBottom: 32 }} />
+      <div style={{ ...skeletonStyles.block, width: "35%", height: 22, marginBottom: 18 }} />
+      <div style={{ ...skeletonStyles.block, width: "100%", height: 14, marginBottom: 10 }} />
+      <div style={{ ...skeletonStyles.block, width: "88%", height: 14, marginBottom: 10 }} />
+      <div style={{ ...skeletonStyles.block, width: "100%", height: 96, marginBottom: 32 }} />
+      <div style={{ ...skeletonStyles.block, width: "40%", height: 22, marginBottom: 18 }} />
+      <div style={{ ...skeletonStyles.block, width: "100%", height: 14, marginBottom: 10 }} />
+      <div style={{ ...skeletonStyles.block, width: "76%", height: 14 }} />
+    </div>
+  );
+}
+
+const skeletonStyles = {
+  article: {
+    maxWidth: 720,
+    margin: "0 auto",
+    padding: "56px 32px 120px",
+  },
+  block: {
+    background: "linear-gradient(90deg, var(--bg-elevated-2) 25%, var(--bg-elevated) 50%, var(--bg-elevated-2) 75%)",
+    backgroundSize: "200% 100%",
+    animation: "shimmer 1.5s infinite",
+    borderRadius: 6,
+  },
+  loadingBar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    background: "var(--bg-elevated-2)",
+    zIndex: 10,
+    overflow: "hidden",
+  },
+  loadingBarInner: {
+    height: "100%",
+    width: "40%",
+    background: "var(--accent-rust)",
+    animation: "loadingSlide 1.2s ease-in-out infinite",
+    borderRadius: 1,
+  },
+};
 import { RepositoryBrowser } from "./components/RepositoryBrowser";
 import { ConnectForm } from "./components/ConnectForm";
 import { GroupConnectForm } from "./components/GroupConnectForm";
@@ -417,10 +470,14 @@ function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
       />
-      <main style={{ flex: 1, height: "100vh", overflowY: "auto" }}>
-        {pageLoading && !activePage ? (
-          <div style={{ padding: 56, color: "var(--text-tertiary)", fontSize: 13 }}>Cargando página…</div>
-        ) : (
+      <main style={{ flex: 1, height: "100vh", overflowY: "auto", position: "relative" }}>
+        {pageLoading && !activePage && <PageSkeleton />}
+        {pageLoading && activePage && (
+          <div style={skeletonStyles.loadingBar}>
+            <div style={skeletonStyles.loadingBarInner} />
+          </div>
+        )}
+        {activePage && (
           <WikiPageContent
             page={activePage}
             repositoryId={repository?.id}

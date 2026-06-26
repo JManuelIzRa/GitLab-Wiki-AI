@@ -107,6 +107,10 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS ix_group_memberships_repo ON group_memberships (repository_id)",
     # Per-repo webhook secret (overrides global GITLAB_WEBHOOK_SECRET per repo)
     "ALTER TABLE repositories ADD COLUMN webhook_secret TEXT NOT NULL DEFAULT ''",
+    # Per-repo PAT for webhook-triggered re-indexing (never exposed in API responses)
+    "ALTER TABLE repositories ADD COLUMN gitlab_token TEXT NOT NULL DEFAULT ''",
+    # Custom LLM system prompt override per repo (empty = use default prompts)
+    "ALTER TABLE repositories ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''",
     # FTS5 virtual table for full-text wiki page search
     (
         "CREATE VIRTUAL TABLE IF NOT EXISTS wiki_pages_fts USING fts5("

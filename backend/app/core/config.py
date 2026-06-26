@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     # Presupuesto de contexto por llamada a IA. Recortado respecto a un modelo grande en la nube:
     # un modelo local 3B cuantizado degrada mucho con prompts largos, así que preferimos contextos
     # más pequeños y más enfocados (vía RAG) en vez de "meter todo" en el prompt.
-    max_chars_per_ai_call: int = 12_000
-    max_chat_tokens: int = 1200
+    max_chars_per_ai_call: int = 24_000
+    max_chat_tokens: int = 2048
 
     # --- Chunking de código para RAG ---
     rag_top_k: int = 6                # nº de chunks de código recuperados por pregunta

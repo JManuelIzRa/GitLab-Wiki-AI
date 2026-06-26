@@ -55,6 +55,8 @@ async def run_index_job(job_id: int, gitlab_url: str, project_path: str,
     Punto de entrada llamado por BackgroundTasks. Crea su propia sesión de DB
     porque corre fuera del ciclo de vida normal de un request.
     """
+    _token_hint = (private_token[:4] + "****") if private_token else "(vacío)"
+    logger.info("Iniciando job %s para '%s' (token: %s)", job_id, project_path, _token_hint)
     async with AsyncSessionLocal() as session:
         job = await session.get(IndexJob, job_id)
         if job is None:
@@ -137,6 +139,7 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
         ]
 
         generator = WikiGenerator()
+        system_prompt_override = repo.system_prompt or None
         new_pages: list[WikiPage] = []
         order_counter = 0
 
@@ -160,7 +163,9 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 ",".join(structure.dependency_manifests),
             )
             _reused_overview = _reuse_if_unchanged("overview", overview_hash, existing_pages, force_reindex)
-            overview_md = _reused_overview or await generator.generate_overview(project.name, structure, readme_content)
+            overview_md = _reused_overview or await generator.generate_overview(
+                project.name, structure, readme_content, system_prompt_override=system_prompt_override
+            )
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="overview", title="Overview", order=order_counter,
                 content_markdown=overview_md, source_files=[structure.readme_path] if structure.readme_path else [],
@@ -180,7 +185,9 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 ",".join(structure.config_files),
             )
             _reused_arch = _reuse_if_unchanged("architecture", arch_hash, existing_pages, force_reindex)
-            arch_md = _reused_arch or await generator.generate_architecture(project.name, structure)
+            arch_md = _reused_arch or await generator.generate_architecture(
+                project.name, structure, system_prompt_override=system_prompt_override
+            )
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="architecture", title="Arquitectura", order=order_counter,
                 content_markdown=arch_md, source_files=[m.path for m in structure.modules[:25]],
@@ -214,7 +221,10 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 cached = _reuse_if_unchanged(slug, mod_hash, existing_pages, force_reindex)
                 if cached is None:
                     async with _llm_sem:
-                        cached = await generator.generate_module_page(project.name, module, snippets)
+                        cached = await generator.generate_module_page(
+                            project.name, module, snippets,
+                            system_prompt_override=system_prompt_override,
+                        )
                 return WikiPage(
                     repository_id=repo.id, slug=slug, title=f"Módulo: {module.path}",
                     order=0,  # filled in below after sorting
@@ -239,7 +249,10 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 ",".join(structure.package_managers),
             )
             _reused_setup = _reuse_if_unchanged("setup", setup_hash, existing_pages, force_reindex)
-            setup_md = _reused_setup or await generator.generate_setup_guide(project.name, structure, manifest_snippets, readme_content)
+            setup_md = _reused_setup or await generator.generate_setup_guide(
+                project.name, structure, manifest_snippets, readme_content,
+                system_prompt_override=system_prompt_override,
+            )
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="setup", title="Cómo ejecutar el proyecto", order=order_counter,
                 content_markdown=setup_md, source_files=structure.dependency_manifests,

@@ -310,8 +310,14 @@ class WikiGenerator:
     # Core LLM call with exponential-backoff retry
     # ------------------------------------------------------------------
 
-    async def _ask(self, user_prompt: str, system_prompt: str | None = None, max_tokens: int | None = None) -> str:
-        effective_system = system_prompt if system_prompt is not None else self._p["system"]
+    async def _ask(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        max_tokens: int | None = None,
+        system_prompt_override: str | None = None,
+    ) -> str:
+        effective_system = system_prompt_override or (system_prompt if system_prompt is not None else self._p["system"])
         _retryable = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError)
         last_exc: Exception | None = None
         for attempt in range(4):
@@ -324,6 +330,12 @@ class WikiGenerator:
                         {"role": "user", "content": user_prompt},
                     ],
                 )
+                usage = response.usage
+                if usage:
+                    logger.debug(
+                        "LLM token usage: prompt=%d completion=%d total=%d",
+                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens,
+                    )
                 return response.choices[0].message.content or ""
             except openai.RateLimitError as exc:
                 last_exc = exc
@@ -342,7 +354,8 @@ class WikiGenerator:
     # ------------------------------------------------------------------
 
     async def generate_overview(
-        self, project_name: str, structure: RepoStructure, readme_content: str | None
+        self, project_name: str, structure: RepoStructure, readme_content: str | None,
+        system_prompt_override: str | None = None,
     ) -> str:
         lang_summary = ", ".join(f"{lang} ({count} files)" for lang, count in list(structure.languages.items())[:8])
         prompt = self._p["overview"].format(
@@ -353,9 +366,12 @@ class WikiGenerator:
             dependency_manifests=", ".join(structure.dependency_manifests) or "none",
             readme=_truncate(readme_content or "(no README found)", settings.max_chars_per_ai_call),
         )
-        return await self._ask(prompt)
+        return await self._ask(prompt, system_prompt_override=system_prompt_override)
 
-    async def generate_architecture(self, project_name: str, structure: RepoStructure) -> str:
+    async def generate_architecture(
+        self, project_name: str, structure: RepoStructure,
+        system_prompt_override: str | None = None,
+    ) -> str:
         modules_desc = "\n".join(
             f"- `{m.path}` ({m.file_count} files, languages: {', '.join(m.languages) or 'n/a'}). "
             f"Examples: {', '.join(m.sample_files[:5])}"
@@ -368,10 +384,11 @@ class WikiGenerator:
             entrypoints=entrypoints,
             config_files=", ".join(structure.config_files) or "none",
         )
-        return await self._ask(prompt)
+        return await self._ask(prompt, system_prompt_override=system_prompt_override)
 
     async def generate_module_page(
-        self, project_name: str, module: ModuleInfo, snippets: list[FileSnippet]
+        self, project_name: str, module: ModuleInfo, snippets: list[FileSnippet],
+        system_prompt_override: str | None = None,
     ) -> str:
         files_context = _budget_snippets(snippets, settings.max_chars_per_ai_call)
         prompt = self._p["module"].format(
@@ -381,7 +398,7 @@ class WikiGenerator:
             languages=", ".join(module.languages) or "n/a",
             files_context=files_context,
         )
-        return await self._ask(prompt)
+        return await self._ask(prompt, system_prompt_override=system_prompt_override)
 
     async def generate_setup_guide(
         self,
@@ -389,6 +406,7 @@ class WikiGenerator:
         structure: RepoStructure,
         manifest_contents: list[FileSnippet],
         readme_content: str | None,
+        system_prompt_override: str | None = None,
     ) -> str:
         manifests_context = _budget_snippets(manifest_contents, settings.max_chars_per_ai_call)
         prompt = self._p["setup"].format(
@@ -398,7 +416,7 @@ class WikiGenerator:
             manifests_context=manifests_context or "(no readable manifests found)",
             readme=_truncate(readme_content or "(no README)", 4000),
         )
-        return await self._ask(prompt)
+        return await self._ask(prompt, system_prompt_override=system_prompt_override)
 
     # ------------------------------------------------------------------
     # RAG chat — non-streaming and streaming variants

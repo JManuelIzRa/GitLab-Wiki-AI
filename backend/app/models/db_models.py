@@ -135,6 +135,10 @@ class Repository(Base):
     workspace_roots: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     # Per-repo webhook secret for validating GitLab push webhooks (overrides global setting).
     webhook_secret: Mapped[str] = mapped_column(String(128), default="")
+    # Optional PAT stored for webhook-triggered re-indexing (never returned by the API).
+    gitlab_token: Mapped[str] = mapped_column(String(512), default="")
+    # Custom LLM system prompt override for this repo's wiki generation (empty = use default).
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
     # Optional FK to the GitLab group this repo belongs to (SET NULL on group delete)
     group_id: Mapped[int | None] = mapped_column(
         ForeignKey("gitlab_groups.id", ondelete="SET NULL"), nullable=True, index=True
