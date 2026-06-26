@@ -1,8 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
-import mermaid from "../utils/mermaid";
+import mermaid, { MERMAID_DARK_VARS, MERMAID_LIGHT_VARS } from "../utils/mermaid";
 import { api } from "../api/client";
 
-/** Convierte un nombre de módulo (puede tener / y .) en un id válido para mermaid. */
 function sanitizeNodeId(name) {
   return "n_" + name.replace(/[^a-zA-Z0-9]/g, "_");
 }
@@ -29,10 +28,33 @@ export function DependencyGraphView({ repositoryId, onClose }) {
   const [graph, setGraph] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [isRendering, setIsRendering] = useState(false);
+  const [copied, setCopied] = useState(false);
   const containerRef = useRef(null);
   const rawId = useId();
   const baseId = `depgraph-${rawId.replace(/:/g, "")}`;
   const renderSeq = useRef(0);
+
+  // Track app theme so the diagram re-renders when the user switches dark/light
+  const [mermaidTheme, setMermaidTheme] = useState(
+    () => document.documentElement.getAttribute("data-theme") === "light" ? "default" : "dark"
+  );
+  useEffect(() => {
+    const mo = new MutationObserver(() => {
+      setMermaidTheme(
+        document.documentElement.getAttribute("data-theme") === "light" ? "default" : "dark"
+      );
+    });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => mo.disconnect();
+  }, []);
+
+  // Close on Escape key
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,9 +72,7 @@ export function DependencyGraphView({ repositoryId, onClose }) {
     }
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [repositoryId]);
 
   useEffect(() => {
@@ -62,12 +82,22 @@ export function DependencyGraphView({ repositoryId, onClose }) {
 
     let cancelled = false;
     const renderId = `${baseId}-${++renderSeq.current}`;
+    setIsRendering(true);
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: mermaidTheme,
+      themeVariables: mermaidTheme === "default" ? MERMAID_LIGHT_VARS : MERMAID_DARK_VARS,
+    });
 
     let timedOut = false;
     const tid = setTimeout(() => {
       timedOut = true;
       document.getElementById(`d${renderId}`)?.remove();
-      if (!cancelled) setError("El grafo tardó más de 10 s en renderizarse.");
+      if (!cancelled) {
+        setError("El grafo tardó más de 10 s en renderizarse.");
+        setIsRendering(false);
+      }
     }, 10_000);
 
     mermaid
@@ -76,32 +106,83 @@ export function DependencyGraphView({ repositoryId, onClose }) {
         clearTimeout(tid);
         if (!cancelled && !timedOut && containerRef.current) {
           containerRef.current.innerHTML = svg;
+          setIsRendering(false);
         }
       })
       .catch((err) => {
         clearTimeout(tid);
         document.getElementById(`d${renderId}`)?.remove();
-        if (!cancelled) setError("No se pudo renderizar el grafo: " + (err?.message || err));
+        if (!cancelled) {
+          setError("No se pudo renderizar el grafo: " + (err?.message || err));
+          setIsRendering(false);
+        }
       });
     return () => {
       cancelled = true;
       clearTimeout(tid);
       document.getElementById(`d${renderId}`)?.remove();
     };
-  }, [graph]);
+  }, [graph, mermaidTheme]);
+
+  const handleCopyCode = () => {
+    if (!graph) return;
+    const code = graphToMermaid(graph);
+    if (!code) return;
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  };
+
+  const handleDownloadSVG = () => {
+    const svg = containerRef.current?.innerHTML;
+    if (!svg) return;
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "dependency-graph.svg";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const hasGraph = !loading && !error && graph && graph.nodes.length > 0;
 
   return (
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div style={styles.header}>
           <span style={styles.title}>grafo de dependencias entre módulos</span>
-          <button onClick={onClose} style={styles.closeBtn}>
-            ✕
-          </button>
+          <div style={styles.headerActions}>
+            {hasGraph && (
+              <>
+                <button
+                  onClick={handleCopyCode}
+                  style={{ ...styles.headerBtn, color: copied ? "var(--accent-sage)" : "var(--text-tertiary)" }}
+                  title="Copiar código Mermaid"
+                >
+                  {copied ? "✓" : "⎘"} código
+                </button>
+                <button
+                  onClick={handleDownloadSVG}
+                  style={styles.headerBtn}
+                  title="Descargar como SVG"
+                  disabled={isRendering}
+                >
+                  ↓ svg
+                </button>
+              </>
+            )}
+            <button onClick={onClose} style={styles.closeBtn}>✕</button>
+          </div>
         </div>
 
         <div style={styles.body}>
-          {loading && <p style={styles.hint}>Cargando grafo…</p>}
+          {loading && (
+            <div style={styles.skeletonWrapper}>
+              <div style={styles.skeletonBar} />
+            </div>
+          )}
           {error && <div style={styles.errorBox}>{error}</div>}
           {!loading && !error && graph && graph.nodes.length === 0 && (
             <p style={styles.hint}>
@@ -110,13 +191,20 @@ export function DependencyGraphView({ repositoryId, onClose }) {
               los módulos no se importan entre sí directamente.
             </p>
           )}
-          {!loading && !error && graph && graph.nodes.length > 0 && (
+          {hasGraph && (
             <>
               <p style={styles.subhint}>
-                Flechas = dependencia detectada por imports/requires reales en el código.
-                El número en la flecha indica cuántos imports hay entre esos dos módulos.
+                {graph.nodes.length} módulos · {graph.edges.length} dependencias detectadas.{" "}
+                Flechas = imports/requires reales; el número indica cuántos imports hay entre esos módulos.
               </p>
-              <div ref={containerRef} style={styles.diagramContainer} />
+              <div style={styles.diagramWrapper}>
+                {isRendering && (
+                  <div style={styles.diagramLoadingOverlay}>
+                    <div style={styles.diagramLoadingBar} />
+                  </div>
+                )}
+                <div ref={containerRef} style={styles.diagramContainer} />
+              </div>
             </>
           )}
         </div>
@@ -152,13 +240,30 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "14px 16px",
+    padding: "12px 16px",
     borderBottom: "1px solid var(--border-subtle)",
+    gap: 12,
   },
   title: {
     fontSize: 12,
     letterSpacing: "0.05em",
     color: "var(--text-secondary)",
+    flexShrink: 0,
+  },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  },
+  headerBtn: {
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "3px 8px",
+    fontSize: 11,
+    fontFamily: "var(--font-mono)",
+    cursor: "pointer",
+    color: "var(--text-tertiary)",
   },
   closeBtn: {
     background: "none",
@@ -166,6 +271,7 @@ const styles = {
     color: "var(--text-tertiary)",
     fontSize: 14,
     cursor: "pointer",
+    padding: "2px 6px",
   },
   body: {
     flex: 1,
@@ -183,10 +289,43 @@ const styles = {
     color: "var(--text-tertiary)",
     marginBottom: 14,
   },
+  diagramWrapper: {
+    position: "relative",
+    minHeight: 160,
+  },
+  diagramLoadingOverlay: {
+    position: "absolute",
+    inset: 0,
+    borderRadius: 6,
+    overflow: "hidden",
+    background: "var(--bg-elevated-2)",
+    zIndex: 1,
+  },
+  diagramLoadingBar: {
+    position: "absolute",
+    inset: 0,
+    backgroundImage: "linear-gradient(90deg, transparent 0%, var(--bg-hover) 50%, transparent 100%)",
+    backgroundSize: "200% 100%",
+    animation: "shimmer 1.8s ease-in-out infinite",
+  },
   diagramContainer: {
     display: "flex",
     justifyContent: "center",
-    minHeight: 200,
+    minHeight: 160,
+  },
+  skeletonWrapper: {
+    borderRadius: 8,
+    overflow: "hidden",
+    height: 200,
+    position: "relative",
+    background: "var(--bg-elevated-2)",
+  },
+  skeletonBar: {
+    position: "absolute",
+    inset: 0,
+    backgroundImage: "linear-gradient(90deg, transparent 0%, var(--bg-hover) 50%, transparent 100%)",
+    backgroundSize: "200% 100%",
+    animation: "shimmer 1.8s ease-in-out infinite",
   },
   errorBox: {
     background: "rgba(192,89,74,0.12)",

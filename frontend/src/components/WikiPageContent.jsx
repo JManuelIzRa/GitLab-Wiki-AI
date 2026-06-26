@@ -3,8 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Check, History, Pencil, RotateCcw, Upload, X, ZoomIn } from "lucide-react";
-import mermaid from "../utils/mermaid";
+import { Check, Download, History, Pencil, RotateCcw, Upload, X, ZoomIn } from "lucide-react";
+import mermaid, { MERMAID_DARK_VARS, MERMAID_LIGHT_VARS } from "../utils/mermaid";
 import { api } from "../api/client";
 
 // ---------------------------------------------------------------------------
@@ -29,31 +29,12 @@ function Toast({ message, onHide }) {
 // Mermaid
 // ---------------------------------------------------------------------------
 
-const MERMAID_DARK_VARS = {
-  background: "#201D17",
-  primaryColor: "#2A2620",
-  primaryTextColor: "#EDE8DC",
-  primaryBorderColor: "#C97C4A",
-  lineColor: "#8A5536",
-  secondaryColor: "#332E25",
-  tertiaryColor: "#201D17",
-  fontFamily: "JetBrains Mono, monospace",
-};
-const MERMAID_LIGHT_VARS = {
-  background: "#F7F3EC",
-  primaryColor: "#EDE8DC",
-  primaryTextColor: "#1A150C",
-  primaryBorderColor: "#A05A28",
-  lineColor: "#C87A44",
-  secondaryColor: "#E2DAC8",
-  tertiaryColor: "#EDE8DC",
-  fontFamily: "JetBrains Mono, monospace",
-};
-
 function MermaidDiagram({ code }) {
   const containerRef = useRef(null);
   const [error, setError] = useState(null);
+  const [isRendering, setIsRendering] = useState(true);
   const [zoomed, setZoomed] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const renderSeq = useRef(0);
   const rawId = useId();
@@ -73,9 +54,18 @@ function MermaidDiagram({ code }) {
     return () => mo.disconnect();
   }, []);
 
+  // Close zoom on Escape key
+  useEffect(() => {
+    if (!zoomed) return;
+    const onKey = (e) => { if (e.key === "Escape") setZoomed(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [zoomed]);
+
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    setIsRendering(true);
 
     // Unique ID per render call — prevents "element already exists" when code changes
     // while a previous mermaid.render() is still in flight.
@@ -92,7 +82,10 @@ function MermaidDiagram({ code }) {
     const tid = setTimeout(() => {
       timedOut = true;
       document.getElementById(`d${renderId}`)?.remove();
-      if (!cancelled) setError("El diagrama tardó más de 8 s en renderizarse.");
+      if (!cancelled) {
+        setError("El diagrama tardó más de 8 s en renderizarse.");
+        setIsRendering(false);
+      }
     }, 8_000);
 
     mermaid
@@ -101,13 +94,17 @@ function MermaidDiagram({ code }) {
         clearTimeout(tid);
         if (!cancelled && !timedOut && containerRef.current) {
           containerRef.current.innerHTML = svg;
+          setIsRendering(false);
         }
       })
       .catch((err) => {
         clearTimeout(tid);
         // Clean up the hidden element Mermaid leaves in <body> on failure
         document.getElementById(`d${renderId}`)?.remove();
-        if (!cancelled) setError(err?.message || "Error de sintaxis en el diagrama.");
+        if (!cancelled) {
+          setError(err?.message || "Error de sintaxis en el diagrama.");
+          setIsRendering(false);
+        }
       });
 
     return () => {
@@ -116,6 +113,25 @@ function MermaidDiagram({ code }) {
       document.getElementById(`d${renderId}`)?.remove();
     };
   }, [code, mermaidTheme, retryCount]);
+
+  const handleCopyCode = useCallback(() => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }, [code]);
+
+  const handleDownloadSVG = useCallback(() => {
+    const svg = containerRef.current?.innerHTML;
+    if (!svg) return;
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "diagram.svg";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   if (error) {
     return (
@@ -140,17 +156,36 @@ function MermaidDiagram({ code }) {
 
   return (
     <>
-      <div
-        ref={containerRef}
-        style={{ ...styles.mermaidContainer, cursor: "zoom-in" }}
-        title="Clic para ampliar"
-        onClick={() => setZoomed(true)}
-      />
+      <div style={styles.mermaidWrapper}>
+        {/* Loading shimmer shown while mermaid renders */}
+        {isRendering && <div style={styles.mermaidLoadingOverlay}><div style={styles.mermaidLoadingBar} /></div>}
+
+        <div
+          ref={containerRef}
+          style={{ ...styles.mermaidContainer, cursor: isRendering ? "default" : "zoom-in" }}
+          title={isRendering ? undefined : "Clic para ampliar"}
+          onClick={() => { if (!isRendering) setZoomed(true); }}
+        />
+
+        {!isRendering && (
+          <button
+            style={{ ...styles.diagramActionBtn, color: copied ? "var(--accent-sage)" : "var(--text-tertiary)" }}
+            onClick={(e) => { e.stopPropagation(); handleCopyCode(); }}
+            title="Copiar código"
+          >
+            {copied ? <Check size={11} /> : "⎘"}
+          </button>
+        )}
+      </div>
+
       {zoomed && (
         <div style={styles.zoomOverlay} onClick={() => setZoomed(false)}>
           <div style={styles.zoomPanel} onClick={(e) => e.stopPropagation()}>
-            <button style={styles.zoomClose} onClick={() => setZoomed(false)}>
+            <button style={styles.zoomClose} onClick={() => setZoomed(false)} title="Cerrar (Esc)">
               <X size={14} />
+            </button>
+            <button style={styles.zoomDownloadBtn} onClick={handleDownloadSVG} title="Descargar SVG">
+              <Download size={13} />
             </button>
             <div
               style={styles.zoomContent}
@@ -750,6 +785,26 @@ const styles = {
     fontFamily: "var(--font-mono)",
     lineHeight: 1,
   },
+  mermaidWrapper: {
+    position: "relative",
+    margin: "20px 0",
+  },
+  mermaidLoadingOverlay: {
+    position: "absolute",
+    inset: 0,
+    borderRadius: 8,
+    overflow: "hidden",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-subtle)",
+    zIndex: 1,
+  },
+  mermaidLoadingBar: {
+    position: "absolute",
+    inset: 0,
+    backgroundImage: "linear-gradient(90deg, transparent 0%, var(--bg-hover) 50%, transparent 100%)",
+    backgroundSize: "200% 100%",
+    animation: "shimmer 1.8s ease-in-out infinite",
+  },
   mermaidContainer: {
     display: "flex",
     justifyContent: "center",
@@ -757,8 +812,22 @@ const styles = {
     border: "1px solid var(--border-subtle)",
     borderRadius: 8,
     padding: "24px 12px",
-    margin: "20px 0",
+    minHeight: 80,
     overflowX: "auto",
+  },
+  diagramActionBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 2,
+    background: "rgba(32,29,23,0.7)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "3px 7px",
+    fontSize: 12,
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
+    lineHeight: 1,
   },
   mermaidError: {
     fontSize: 12,
@@ -831,6 +900,19 @@ const styles = {
     padding: "4px 8px",
     cursor: "pointer",
     color: "var(--text-secondary)",
+  },
+  zoomDownloadBtn: {
+    position: "absolute",
+    top: 12,
+    right: 48,
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "4px 8px",
+    cursor: "pointer",
+    color: "var(--text-secondary)",
+    display: "flex",
+    alignItems: "center",
   },
   sourcesBox: {
     marginTop: 48,
