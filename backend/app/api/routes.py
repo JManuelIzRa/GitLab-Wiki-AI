@@ -809,6 +809,43 @@ async def delete_repository(repo_id: int, session: AsyncSession = Depends(get_se
 
 
 # ---------------------------------------------------------------------------
+# Group helpers
+# ---------------------------------------------------------------------------
+
+async def _expand_with_external_deps(
+    session: AsyncSession,
+    group: GitLabGroup,
+    member_ids: list[int],
+) -> list[int]:
+    """Return member_ids expanded with externally-referenced repos.
+
+    Reads "external" edges from the group's stored cross_repo_graph and adds
+    the IDs of those repos (which are indexed in Qdrant but live in other groups)
+    so that search/chat queries automatically include cross-group dependencies.
+    """
+    graph = group.cross_repo_graph or {}
+    external_names = {
+        e["target"]
+        for e in graph.get("edges", [])
+        if e.get("external") and e.get("target")
+    }
+    if not external_names:
+        return member_ids
+
+    external_ids = list(
+        (
+            await session.execute(
+                select(Repository.id).where(
+                    Repository.name.in_(external_names),
+                    Repository.indexed_in_qdrant == True,  # noqa: E712
+                )
+            )
+        ).scalars().all()
+    )
+    return list(set(member_ids) | set(external_ids))
+
+
+# ---------------------------------------------------------------------------
 # Group indexing
 # ---------------------------------------------------------------------------
 
@@ -1037,13 +1074,21 @@ async def cross_repo_search(
     if payload.repo_ids:
         repo_ids = payload.repo_ids
     else:
-        repo_ids = list(
+        member_ids = list(
             (
                 await session.execute(
                     select(Repository.id)
                     .join(GroupMembership, GroupMembership.repository_id == Repository.id)
-                    .where(
-                        GroupMembership.group_id == group_id,
+                    .where(GroupMembership.group_id == group_id)
+                )
+            ).scalars().all()
+        )
+        expanded_ids = await _expand_with_external_deps(session, group, member_ids)
+        repo_ids = list(
+            (
+                await session.execute(
+                    select(Repository.id).where(
+                        Repository.id.in_(expanded_ids),
                         Repository.indexed_in_qdrant == True,  # noqa: E712
                     )
                 )
@@ -1111,13 +1156,12 @@ async def group_chat(
             )
         ).scalars().all()
     )
+    all_repo_ids = await _expand_with_external_deps(session, group, member_repo_ids)
     qdrant_repo_ids = list(
         (
             await session.execute(
-                select(Repository.id)
-                .join(GroupMembership, GroupMembership.repository_id == Repository.id)
-                .where(
-                    GroupMembership.group_id == group_id,
+                select(Repository.id).where(
+                    Repository.id.in_(all_repo_ids),
                     Repository.indexed_in_qdrant == True,  # noqa: E712
                 )
             )
@@ -1126,7 +1170,7 @@ async def group_chat(
     repo_names = list(
         (
             await session.execute(
-                select(Repository.name).where(Repository.id.in_(member_repo_ids))
+                select(Repository.name).where(Repository.id.in_(all_repo_ids))
             )
         ).scalars().all()
     )
@@ -1184,13 +1228,21 @@ async def stream_group_chat(
     if group is None:
         raise HTTPException(status_code=404, detail="Grupo no encontrado")
 
-    qdrant_repo_ids = list(
+    member_ids_stream = list(
         (
             await session.execute(
                 select(Repository.id)
                 .join(GroupMembership, GroupMembership.repository_id == Repository.id)
-                .where(
-                    GroupMembership.group_id == group_id,
+                .where(GroupMembership.group_id == group_id)
+            )
+        ).scalars().all()
+    )
+    all_ids_stream = await _expand_with_external_deps(session, group, member_ids_stream)
+    qdrant_repo_ids = list(
+        (
+            await session.execute(
+                select(Repository.id).where(
+                    Repository.id.in_(all_ids_stream),
                     Repository.indexed_in_qdrant == True,  # noqa: E712
                 )
             )
@@ -1199,9 +1251,7 @@ async def stream_group_chat(
     repo_names = list(
         (
             await session.execute(
-                select(Repository.name)
-                .join(GroupMembership, GroupMembership.repository_id == Repository.id)
-                .where(GroupMembership.group_id == group_id)
+                select(Repository.name).where(Repository.id.in_(all_ids_stream))
             )
         ).scalars().all()
     )
