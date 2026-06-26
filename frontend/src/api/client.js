@@ -136,14 +136,36 @@ export const api = {
 
   getHtmlExportUrl: (repoId) => `${API_BASE}/api/repositories/${repoId}/export/html`,
 
-  searchWikiText: (repoId, q) =>
-    request(`/api/repositories/${repoId}/wiki/search?q=${encodeURIComponent(q)}`),
-
   setWebhookSecret: (repoId, webhookSecret) =>
     request(`/api/repositories/${repoId}/webhook-secret`, {
       method: "PATCH",
       body: JSON.stringify({ webhook_secret: webhookSecret }),
     }),
+
+  /** Store a per-repo PAT so GitLab webhooks can trigger re-indexing without a global default token. */
+  setGitLabToken: (repoId, gitlabToken) =>
+    request(`/api/repositories/${repoId}/gitlab-token`, {
+      method: "PATCH",
+      body: JSON.stringify({ gitlab_token: gitlabToken }),
+    }),
+
+  /** Set a custom LLM system prompt for this repo's wiki generation (empty = restore default). */
+  setSystemPrompt: (repoId, systemPrompt) =>
+    request(`/api/repositories/${repoId}/system-prompt`, {
+      method: "PATCH",
+      body: JSON.stringify({ system_prompt: systemPrompt }),
+    }),
+
+  /** Fetch available branches for a GitLab project (proxied through the backend). */
+  listBranches: (gitlabUrl, projectPath, privateToken) =>
+    request("/api/gitlab/branches", {
+      method: "POST",
+      body: JSON.stringify({ gitlab_url: gitlabUrl, project_path: projectPath, private_token: privateToken }),
+    }),
+
+  /** Full-text search across all wiki pages for a repository. */
+  searchWikiText: (repoId, q) =>
+    request(`/api/repositories/${repoId}/wiki/search?q=${encodeURIComponent(q)}`),
 
   getServerConfig: () => request("/api/config"),
 

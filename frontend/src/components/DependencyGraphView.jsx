@@ -31,7 +31,8 @@ export function DependencyGraphView({ repositoryId, onClose }) {
   const [loading, setLoading] = useState(true);
   const containerRef = useRef(null);
   const rawId = useId();
-  const diagramId = `depgraph-${rawId.replace(/:/g, "")}`;
+  const baseId = `depgraph-${rawId.replace(/:/g, "")}`;
+  const renderSeq = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,18 +61,32 @@ export function DependencyGraphView({ repositoryId, onClose }) {
     if (!code) return;
 
     let cancelled = false;
+    const renderId = `${baseId}-${++renderSeq.current}`;
+
+    let timedOut = false;
+    const tid = setTimeout(() => {
+      timedOut = true;
+      document.getElementById(`d${renderId}`)?.remove();
+      if (!cancelled) setError("El grafo tardó más de 10 s en renderizarse.");
+    }, 10_000);
+
     mermaid
-      .render(diagramId, code)
+      .render(renderId, code)
       .then(({ svg }) => {
-        if (!cancelled && containerRef.current) {
+        clearTimeout(tid);
+        if (!cancelled && !timedOut && containerRef.current) {
           containerRef.current.innerHTML = svg;
         }
       })
       .catch((err) => {
-        if (!cancelled) setError("No se pudo renderizar el grafo: " + err.message);
+        clearTimeout(tid);
+        document.getElementById(`d${renderId}`)?.remove();
+        if (!cancelled) setError("No se pudo renderizar el grafo: " + (err?.message || err));
       });
     return () => {
       cancelled = true;
+      clearTimeout(tid);
+      document.getElementById(`d${renderId}`)?.remove();
     };
   }, [graph]);
 

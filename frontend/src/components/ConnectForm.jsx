@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { api } from "../api/client";
 
 /**
  * Pantalla inicial: pide los datos de conexión a GitLab self-hosted o gitlab.com
@@ -10,7 +11,33 @@ export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, pref
   const [privateToken, setPrivateToken] = useState("");
   const [branch, setBranch] = useState(prefill?.default_branch && prefill.default_branch !== "main" ? prefill.default_branch : "");
   const [showToken, setShowToken] = useState(false);
+  const [branches, setBranches] = useState([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState("");
   const isReindex = Boolean(prefill);
+
+  const fetchBranches = useCallback(async () => {
+    if (!gitlabUrl.trim() || !projectPath.trim() || !privateToken.trim()) {
+      setBranchesError("Completa la URL, ruta del proyecto y token antes de cargar las ramas.");
+      return;
+    }
+    setBranchesLoading(true);
+    setBranchesError("");
+    setBranches([]);
+    try {
+      const res = await api.listBranches(
+        gitlabUrl.trim().replace(/\/+$/, ""),
+        projectPath.trim().replace(/^\/+/, ""),
+        privateToken.trim(),
+      );
+      setBranches(res.branches || []);
+      if (!branch && res.branches?.length) setBranch(res.branches[0]);
+    } catch (err) {
+      setBranchesError(err.message || "No se pudieron cargar las ramas.");
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, [gitlabUrl, projectPath, privateToken, branch]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -90,14 +117,39 @@ export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, pref
             </div>
           </Field>
 
-          <Field label="Branch (opcional)" hint="si se omite, usa el branch por defecto del repo">
-            <input
-              type="text"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              placeholder="main"
-              style={styles.input}
-            />
+          <Field label="Branch (opcional)" hint="omitir para usar el branch por defecto del repo">
+            <div style={styles.tokenRow}>
+              {branches.length > 0 ? (
+                <select
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  style={{ ...styles.input, flex: 1 }}
+                >
+                  <option value="">(branch por defecto)</option>
+                  {branches.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  placeholder="main"
+                  style={{ ...styles.input, flex: 1 }}
+                />
+              )}
+              <button
+                type="button"
+                onClick={fetchBranches}
+                disabled={branchesLoading}
+                style={styles.toggleBtn}
+                title="Cargar ramas disponibles del repositorio"
+              >
+                {branchesLoading ? "…" : "↓ ramas"}
+              </button>
+            </div>
+            {branchesError && <span style={styles.branchError}>{branchesError}</span>}
           </Field>
 
           {errorMessage && <div style={styles.errorBox}>{errorMessage}</div>}
@@ -254,5 +306,10 @@ const styles = {
     color: "var(--text-tertiary)",
     marginTop: 24,
     textAlign: "center",
+  },
+  branchError: {
+    fontSize: 11,
+    color: "var(--accent-red)",
+    fontFamily: "var(--font-mono)",
   },
 };

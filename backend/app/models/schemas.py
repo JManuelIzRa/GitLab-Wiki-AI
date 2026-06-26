@@ -78,7 +78,30 @@ class RepositorySummary(BaseModel):
     is_monorepo: bool = False
     workspace_roots: list[str] | None = None
     webhook_secret: str = ""
+    # True when a per-repo PAT has been stored for webhook re-indexing (token is never returned)
+    gitlab_token_set: bool = False
+    system_prompt: str = ""
     updated_at: datetime
+
+    @classmethod
+    def from_orm_with_extras(cls, repo) -> "RepositorySummary":
+        """Build a summary, computing derived boolean fields that ORM can't map directly."""
+        return cls(
+            id=repo.id,
+            gitlab_url=repo.gitlab_url,
+            project_path=repo.project_path,
+            name=repo.name,
+            description=repo.description,
+            default_branch=repo.default_branch,
+            last_commit_sha=repo.last_commit_sha,
+            indexed_in_qdrant=repo.indexed_in_qdrant,
+            is_monorepo=repo.is_monorepo,
+            workspace_roots=repo.workspace_roots,
+            webhook_secret=repo.webhook_secret,
+            gitlab_token_set=bool(repo.gitlab_token),
+            system_prompt=repo.system_prompt or "",
+            updated_at=repo.updated_at,
+        )
 
 
 class WikiPageSummary(BaseModel):
@@ -150,6 +173,23 @@ class WikiTextSearchResult(BaseModel):
 
 class RepoWebhookSecretUpdate(BaseModel):
     webhook_secret: str = Field(default="", max_length=128)
+
+
+class RepoGitLabTokenUpdate(BaseModel):
+    """Store a PAT so webhook-triggered re-indexing works without a global default token."""
+    gitlab_token: str = Field(default="", max_length=512)
+
+
+class RepoSystemPromptUpdate(BaseModel):
+    """Custom LLM system prompt override for this repo's wiki generation. Empty = use default."""
+    system_prompt: str = Field(default="", max_length=10_000)
+
+
+class BranchListRequest(BaseModel):
+    """Used by the connect form to fetch available branches before indexing."""
+    gitlab_url: str = Field(..., min_length=1, max_length=512)
+    project_path: str = Field(..., min_length=1, max_length=512)
+    private_token: str = Field(..., min_length=1, max_length=512)
 
 
 class ChatResponse(BaseModel):

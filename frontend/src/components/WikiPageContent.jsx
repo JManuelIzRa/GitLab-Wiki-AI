@@ -29,32 +29,111 @@ function Toast({ message, onHide }) {
 // Mermaid
 // ---------------------------------------------------------------------------
 
+const MERMAID_DARK_VARS = {
+  background: "#201D17",
+  primaryColor: "#2A2620",
+  primaryTextColor: "#EDE8DC",
+  primaryBorderColor: "#C97C4A",
+  lineColor: "#8A5536",
+  secondaryColor: "#332E25",
+  tertiaryColor: "#201D17",
+  fontFamily: "JetBrains Mono, monospace",
+};
+const MERMAID_LIGHT_VARS = {
+  background: "#F7F3EC",
+  primaryColor: "#EDE8DC",
+  primaryTextColor: "#1A150C",
+  primaryBorderColor: "#A05A28",
+  lineColor: "#C87A44",
+  secondaryColor: "#E2DAC8",
+  tertiaryColor: "#EDE8DC",
+  fontFamily: "JetBrains Mono, monospace",
+};
+
 function MermaidDiagram({ code }) {
   const containerRef = useRef(null);
   const [error, setError] = useState(null);
   const [zoomed, setZoomed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const renderSeq = useRef(0);
   const rawId = useId();
-  const diagramId = `mermaid-${rawId.replace(/:/g, "")}`;
+  const baseId = `mermaid-${rawId.replace(/:/g, "")}`;
+
+  // Track app theme so diagrams re-render when user switches dark/light
+  const [mermaidTheme, setMermaidTheme] = useState(
+    () => document.documentElement.getAttribute("data-theme") === "light" ? "default" : "dark"
+  );
+  useEffect(() => {
+    const mo = new MutationObserver(() => {
+      setMermaidTheme(
+        document.documentElement.getAttribute("data-theme") === "light" ? "default" : "dark"
+      );
+    });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => mo.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
+    setError(null);
+
+    // Unique ID per render call — prevents "element already exists" when code changes
+    // while a previous mermaid.render() is still in flight.
+    const renderId = `${baseId}-${++renderSeq.current}`;
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: mermaidTheme,
+      themeVariables: mermaidTheme === "default" ? MERMAID_LIGHT_VARS : MERMAID_DARK_VARS,
+    });
+
+    // 8-second safety timeout for complex or malformed diagrams that never reject
+    let timedOut = false;
+    const tid = setTimeout(() => {
+      timedOut = true;
+      document.getElementById(`d${renderId}`)?.remove();
+      if (!cancelled) setError("El diagrama tardó más de 8 s en renderizarse.");
+    }, 8_000);
+
     mermaid
-      .render(diagramId, code)
+      .render(renderId, code)
       .then(({ svg }) => {
-        if (!cancelled && containerRef.current) {
+        clearTimeout(tid);
+        if (!cancelled && !timedOut && containerRef.current) {
           containerRef.current.innerHTML = svg;
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
+        clearTimeout(tid);
+        // Clean up the hidden element Mermaid leaves in <body> on failure
+        document.getElementById(`d${renderId}`)?.remove();
+        if (!cancelled) setError(err?.message || "Error de sintaxis en el diagrama.");
       });
-    return () => { cancelled = true; };
-  }, [code]);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(tid);
+      document.getElementById(`d${renderId}`)?.remove();
+    };
+  }, [code, mermaidTheme, retryCount]);
 
   if (error) {
     return (
       <div style={styles.mermaidError}>
-        No se pudo renderizar el diagrama. <code>{error}</code>
+        <div style={styles.mermaidErrorHeader}>
+          <span>No se pudo renderizar el diagrama</span>
+          <button
+            style={styles.mermaidRetryBtn}
+            onClick={() => { setError(null); setRetryCount((c) => c + 1); }}
+          >
+            reintentar
+          </button>
+        </div>
+        <code style={{ display: "block", marginTop: 6, wordBreak: "break-all", fontSize: 11 }}>{error}</code>
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: "pointer", fontSize: 11, color: "var(--text-tertiary)" }}>ver código fuente</summary>
+          <pre style={styles.mermaidRawPre}>{code}</pre>
+        </details>
       </div>
     );
   }
@@ -685,9 +764,38 @@ const styles = {
     fontSize: 12,
     color: "var(--accent-red)",
     background: "rgba(192,89,74,0.1)",
+    border: "1px solid rgba(192,89,74,0.25)",
     padding: 12,
     borderRadius: 6,
     margin: "16px 0",
+  },
+  mermaidErrorHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  mermaidRetryBtn: {
+    fontSize: 11,
+    fontFamily: "var(--font-mono)",
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "2px 8px",
+    cursor: "pointer",
+    color: "var(--text-secondary)",
+  },
+  mermaidRawPre: {
+    fontSize: 11,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-tertiary)",
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "8px 10px",
+    margin: "6px 0 0",
+    overflow: "auto",
+    whiteSpace: "pre",
   },
   zoomOverlay: {
     position: "fixed",

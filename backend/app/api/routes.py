@@ -57,12 +57,12 @@ from app.models.db_models import (
     IndexJob, JobStatus, Repository, WikiCache, WikiPage, WikiPageRevision,
 )
 from app.models.schemas import (
-    ChatRequest, ChatResponse, CodeSearchRequest, CodeSearchResponse, CodeSource,
+    BranchListRequest, ChatRequest, ChatResponse, CodeSearchRequest, CodeSearchResponse, CodeSource,
     CrossRepoSearchRequest, CrossRepoSearchResponse, CrossRepoSearchResult,
     DependencyGraphResponse, GitLabWebhookPayload, GroupDetail, GroupJobResponse,
     GroupRepoStatusResponse, GroupSummary, IndexGroupRequest, IndexJobResponse, IndexRepositoryRequest,
-    PushToGitLabWikiRequest, PushToGitLabWikiResponse, RepoWebhookSecretUpdate,
-    RepositorySummary, WikiPageDetail, WikiPageSummary, WikiPageUpdate,
+    PushToGitLabWikiRequest, PushToGitLabWikiResponse, RepoGitLabTokenUpdate, RepoSystemPromptUpdate,
+    RepoWebhookSecretUpdate, RepositorySummary, WikiPageDetail, WikiPageSummary, WikiPageUpdate,
     WikiRevisionResponse, WikiStructureResponse, WikiTextSearchResult,
 )
 from app.services.embedding_client import EmbeddingError, get_embedding_client
@@ -305,7 +305,7 @@ async def list_repositories(
             select(Repository).order_by(Repository.updated_at.desc()).offset(offset).limit(limit)
         )
     ).scalars().all()
-    return repos
+    return [RepositorySummary.from_orm_with_extras(r) for r in repos]
 
 
 @router.get("/repositories/{repo_id}/wiki", response_model=WikiStructureResponse)
@@ -316,7 +316,7 @@ async def get_wiki_structure(repo_id: int, session: AsyncSession = Depends(get_s
     pages = (
         await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order))
     ).scalars().all()
-    return WikiStructureResponse(repository=repo, pages=pages)
+    return WikiStructureResponse(repository=RepositorySummary.from_orm_with_extras(repo), pages=pages)
 
 
 @router.get("/repositories/{repo_id}/wiki/{slug}", response_model=WikiPageDetail)
@@ -585,6 +585,64 @@ async def set_repo_webhook_secret(
     repo.webhook_secret = payload.webhook_secret
     await session.commit()
     return {"ok": True, "webhook_secret_set": bool(payload.webhook_secret)}
+
+
+@router.patch("/repositories/{repo_id}/gitlab-token")
+async def set_repo_gitlab_token(
+    repo_id: int,
+    payload: RepoGitLabTokenUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Store (or clear) a per-repo PAT used when a GitLab webhook triggers re-indexing.
+
+    This lets each repo have its own token without requiring a global GITLAB_DEFAULT_TOKEN.
+    The token is stored server-side and never returned by the API (only a boolean is exposed).
+    """
+    repo = await session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+    repo.gitlab_token = payload.gitlab_token
+    await session.commit()
+    return {"ok": True, "token_set": bool(payload.gitlab_token)}
+
+
+@router.patch("/repositories/{repo_id}/system-prompt")
+async def set_repo_system_prompt(
+    repo_id: int,
+    payload: RepoSystemPromptUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Set a custom LLM system prompt for this repo's wiki generation.
+
+    When set, replaces the default system prompt for all LLM calls (overview,
+    architecture, module pages, setup guide). Empty string restores the default.
+    Takes effect on the next re-index.
+    """
+    repo = await session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+    repo.system_prompt = payload.system_prompt
+    await session.commit()
+    return {"ok": True, "system_prompt_set": bool(payload.system_prompt)}
+
+
+@router.post("/gitlab/branches")
+async def list_gitlab_branches(payload: BranchListRequest):
+    """Proxy: list branches for a GitLab project. Used by the connect form to populate a dropdown."""
+    try:
+        async with GitLabClient(base_url=payload.gitlab_url, private_token=payload.private_token) as client:
+            from urllib.parse import quote
+            encoded = quote(payload.project_path, safe="")
+            resp = await client._get(f"{client.api_url}/projects/{encoded}")
+            project_id = str(resp.json()["id"])
+            branches = await client.list_branches(project_id)
+            return {"branches": branches}
+    except GitLabAuthError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except GitLabNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo conectar con GitLab: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -888,9 +946,15 @@ async def gitlab_webhook(
     if repo is None:
         return {"ok": True, "skipped": True, "reason": "repo not indexed"}
 
-    if not settings.gitlab_default_token:
-        logger.warning("Webhook for '%s' received but GITLAB_DEFAULT_TOKEN is not configured", project_path)
-        return {"ok": True, "skipped": True, "reason": "no default token configured"}
+    # Token priority: per-repo stored token → global default token.
+    reindex_token = repo.gitlab_token or settings.gitlab_default_token
+    if not reindex_token:
+        logger.warning(
+            "Webhook for '%s' received but no token available for re-indexing. "
+            "Set GITLAB_DEFAULT_TOKEN or configure a per-repo token via PATCH /repositories/{id}/gitlab-token.",
+            project_path,
+        )
+        return {"ok": True, "skipped": True, "reason": "no token configured for re-indexing"}
 
     active_job = (
         await session.execute(
@@ -914,7 +978,7 @@ async def gitlab_webhook(
 
     background_tasks.add_task(
         run_index_job, job.id, repo.gitlab_url, repo.project_path,
-        settings.gitlab_default_token, None, False,
+        reindex_token, None, False,
     )
     return {"ok": True, "job_id": job.id}
 
@@ -1109,7 +1173,7 @@ async def get_group(group_id: int, session: AsyncSession = Depends(get_session))
         description=group.description,
         updated_at=group.updated_at,
         overview_markdown=group.overview_markdown,
-        repositories=repos,
+        repositories=[RepositorySummary.from_orm_with_extras(r) for r in repos],
         cross_repo_graph=group.cross_repo_graph or {},
     )
 

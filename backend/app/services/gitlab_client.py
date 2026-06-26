@@ -171,6 +171,14 @@ class GitLabClient:
         except (UnicodeDecodeError, ValueError):
             return None  # binario o encoding no soportado
 
+    async def list_branches(self, project_id: str, max_branches: int = 50) -> list[str]:
+        """Return branch names for a project, sorted by name, up to max_branches."""
+        resp = await self._get(
+            f"{self.api_url}/projects/{project_id}/repository/branches",
+            params={"per_page": min(max_branches, 100), "order_by": "name"},
+        )
+        return [b["name"] for b in resp.json()]
+
     async def get_group(self, group_path: str) -> dict:
         """Returns metadata for a GitLab group or subgroup."""
         encoded = quote(group_path, safe="")
