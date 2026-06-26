@@ -6,6 +6,7 @@ venv/
 *.db
 .env
 backend/.env
+*.egg-info/
 
 # --- Frontend (Node) ---
 node_modules/

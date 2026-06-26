@@ -112,3 +112,30 @@ class VectorStore:
 
     async def close(self) -> None:
         await self._client.close()
+
+    @staticmethod
+    async def cleanup_orphan_collections(known_repo_ids: set[int]) -> None:
+        """Delete Qdrant collections whose repo ID is no longer in the database."""
+        prefix = settings.qdrant_collection_prefix
+        client = AsyncQdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+        try:
+            response = await client.get_collections()
+            for col in response.collections:
+                name = col.name
+                if not name.startswith(prefix):
+                    continue
+                suffix = name[len(prefix):]
+                try:
+                    repo_id = int(suffix)
+                except ValueError:
+                    continue
+                if repo_id not in known_repo_ids:
+                    logger.info("Deleting orphan Qdrant collection '%s' (repo %d not in DB)", name, repo_id)
+                    try:
+                        await client.delete_collection(name)
+                    except Exception:
+                        logger.warning("Failed to delete orphan collection '%s'", name, exc_info=True)
+        except Exception:
+            logger.warning("Qdrant orphan cleanup failed; skipping.", exc_info=True)
+        finally:
+            await client.close()

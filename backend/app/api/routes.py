@@ -16,8 +16,11 @@ Convención de rutas:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
+from collections import OrderedDict
 
 import openai
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
@@ -25,12 +28,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.db.session import AsyncSessionLocal, get_session
 from app.models.db_models import IndexJob, JobStatus, Repository, WikiPage
 from app.models.schemas import (
     ChatRequest, ChatResponse, CodeSearchRequest, CodeSearchResponse, CodeSource,
-    DependencyGraphResponse, IndexJobResponse, IndexRepositoryRequest, RepositorySummary,
-    WikiPageDetail, WikiPageSummary, WikiPageUpdate, WikiStructureResponse,
+    DependencyGraphResponse, GitLabWebhookPayload, IndexJobResponse, IndexRepositoryRequest,
+    RepositorySummary, WikiPageDetail, WikiPageSummary, WikiPageUpdate, WikiStructureResponse,
 )
 from app.services.embedding_client import EmbeddingError, get_embedding_client
 from app.services.indexer import run_index_job
@@ -42,13 +47,49 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
+# ---------------------------------------------------------------------------
+# In-memory LRU cache for chat answers.
+# Key: "<repo_id>:<sha256(question)>" — avoids storing raw question strings.
+# Cleared per-repo when a new indexing job starts so stale answers don't linger.
+# ---------------------------------------------------------------------------
+_CHAT_CACHE_MAX = 256
+_chat_cache: OrderedDict[str, tuple[str, list]] = OrderedDict()
+
+
+def _cache_key(repo_id: int, question: str) -> str:
+    q_hash = hashlib.sha256(question.encode()).hexdigest()[:16]
+    return f"{repo_id}:{q_hash}"
+
+
+def _cache_get(key: str) -> tuple[str, list] | None:
+    if key not in _chat_cache:
+        return None
+    _chat_cache.move_to_end(key)
+    return _chat_cache[key]
+
+
+def _cache_set(key: str, value: tuple[str, list]) -> None:
+    _chat_cache[key] = value
+    _chat_cache.move_to_end(key)
+    if len(_chat_cache) > _CHAT_CACHE_MAX:
+        _chat_cache.popitem(last=False)
+
+
+def _cache_invalidate_repo(repo_id: int) -> None:
+    prefix = f"{repo_id}:"
+    stale = [k for k in _chat_cache if k.startswith(prefix)]
+    for k in stale:
+        del _chat_cache[k]
+
 
 def _get_wiki_generator(request: Request) -> WikiGenerator:
     return request.app.state.wiki_generator
 
 
 @router.post("/repositories/index", response_model=IndexJobResponse)
+@limiter.limit(settings.rate_limit_index)
 async def index_repository(
+    request: Request,
     payload: IndexRepositoryRequest,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
@@ -78,6 +119,27 @@ async def index_repository(
         await session.refresh(repo)
     else:
         repo = existing
+        # Guard against simultaneous indexing of the same repo: if there is already
+        # a non-terminal job running, return it instead of spawning a duplicate.
+        active_job = (
+            await session.execute(
+                select(IndexJob)
+                .where(
+                    IndexJob.repository_id == repo.id,
+                    IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
+                )
+                .limit(1)
+            )
+        ).scalars().first()
+        if active_job:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya hay un job de indexado activo (job_id={active_job.id}) para este repositorio. "
+                       "Espera a que termine antes de relanzar.",
+            )
+
+    # Invalidate cached chat answers — the wiki is about to change.
+    _cache_invalidate_repo(repo.id)
 
     job = IndexJob(repository_id=repo.id, status=JobStatus.PENDING.value, progress=0, current_step="En cola...")
     session.add(job)
@@ -273,7 +335,9 @@ async def search_code(repo_id: int, payload: CodeSearchRequest, session: AsyncSe
 
 
 @router.post("/repositories/{repo_id}/chat", response_model=ChatResponse)
+@limiter.limit(settings.rate_limit_chat)
 async def chat_with_repo(
+    request: Request,
     repo_id: int,
     payload: ChatRequest,
     session: AsyncSession = Depends(get_session),
@@ -292,6 +356,12 @@ async def chat_with_repo(
     repo = await session.get(Repository, repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+
+    # Return cached answer for repeated identical questions (same repo + same question).
+    ck = _cache_key(repo_id, payload.question)
+    if cached := _cache_get(ck):
+        cached_answer, cached_sources = cached
+        return ChatResponse(answer=cached_answer, sources=cached_sources)
 
     page_rows = (
         await session.execute(
@@ -346,7 +416,161 @@ async def chat_with_repo(
         )
         for c in retrieved_chunks
     ]
+
+    _cache_set(ck, (answer, sources))
     return ChatResponse(answer=answer, sources=sources)
+
+
+@router.post("/repositories/{repo_id}/chat/stream")
+@limiter.limit(settings.rate_limit_chat)
+async def stream_chat_with_repo(
+    request: Request,
+    repo_id: int,
+    payload: ChatRequest,
+    session: AsyncSession = Depends(get_session),
+    wiki_generator: WikiGenerator = Depends(_get_wiki_generator),
+):
+    """SSE endpoint that streams LLM answer tokens as they arrive.
+
+    Events:
+    - ``event: sources`` — JSON array of CodeSource objects (sent before tokens)
+    - ``data: {"token": "..."}`` — incremental answer token
+    - ``event: done``  — stream finished
+    - ``event: error`` — JSON with ``message`` field
+    """
+    repo = await session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+
+    page_rows = (
+        await session.execute(
+            select(WikiPage.title, WikiPage.content_markdown)
+            .where(WikiPage.repository_id == repo_id)
+            .order_by(WikiPage.order)
+        )
+    ).all()
+    if not page_rows:
+        raise HTTPException(status_code=400, detail="Este repositorio aún no tiene wiki generado")
+
+    wiki_summary = "\n\n".join(f"## {title}\n{content[:500]}" for title, content in page_rows)
+
+    retrieved_chunks = []
+    if repo.indexed_in_qdrant:
+        query_vector = None
+        try:
+            query_vector = await get_embedding_client().embed_one(payload.question)
+        except EmbeddingError as e:
+            logger.warning("Embedding failed for streaming chat, falling back to wiki-only: %s", e)
+
+        if query_vector is not None:
+            vector_store = VectorStore(repo_id)
+            try:
+                retrieved_chunks = await vector_store.search(query_vector)
+            except Exception:
+                logger.warning("Qdrant search failed for streaming chat (repo %s)", repo_id)
+            finally:
+                await vector_store.close()
+
+    sources = [
+        CodeSource(
+            file_path=c.file_path, start_line=c.start_line, end_line=c.end_line,
+            content=c.content, score=c.score,
+        )
+        for c in retrieved_chunks
+    ]
+
+    # Capture locals for the closure — the session is closed after this function returns.
+    repo_name = repo.name
+    question = payload.question
+
+    async def event_generator():
+        if sources:
+            yield f"event: sources\ndata: {json.dumps([s.model_dump() for s in sources])}\n\n"
+        try:
+            async for token in wiki_generator.stream_answer_question_rag(
+                project_name=repo_name,
+                question=question,
+                retrieved_chunks=retrieved_chunks,
+                wiki_summary=wiki_summary,
+            ):
+                yield f"data: {json.dumps({'token': token})}\n\n"
+        except openai.AuthenticationError:
+            yield f"event: error\ndata: {json.dumps({'message': 'LLM authentication error'})}\n\n"
+        except (openai.APIConnectionError, openai.APIError) as exc:
+            yield f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"
+        finally:
+            yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/webhooks/gitlab", status_code=202)
+async def gitlab_webhook(
+    request: Request,
+    payload: GitLabWebhookPayload,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+):
+    """Receives GitLab push webhooks and triggers a re-index of the affected repository.
+
+    Configure the webhook in GitLab under Settings → Webhooks, selecting the **Push events**
+    trigger. Set the secret token to the value of ``GITLAB_WEBHOOK_SECRET``.
+    """
+    if settings.gitlab_webhook_secret:
+        token = request.headers.get("x-gitlab-token", "")
+        if not hmac.compare_digest(token, settings.gitlab_webhook_secret):
+            raise HTTPException(status_code=403, detail="Invalid webhook token")
+
+    if payload.object_kind != "push":
+        return {"ok": True, "skipped": True, "reason": "not a push event"}
+
+    project_path = payload.project.get("path_with_namespace", "")
+    if not project_path:
+        raise HTTPException(status_code=422, detail="Missing project.path_with_namespace in payload")
+
+    repo = (
+        await session.execute(
+            select(Repository).where(Repository.project_path == project_path).limit(1)
+        )
+    ).scalars().first()
+
+    if repo is None:
+        return {"ok": True, "skipped": True, "reason": "repo not indexed"}
+
+    if not settings.gitlab_default_token:
+        logger.warning("Webhook for '%s' received but GITLAB_DEFAULT_TOKEN is not configured", project_path)
+        return {"ok": True, "skipped": True, "reason": "no default token configured"}
+
+    # Prevent duplicate jobs for rapid successive pushes.
+    active_job = (
+        await session.execute(
+            select(IndexJob)
+            .where(
+                IndexJob.repository_id == repo.id,
+                IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
+            )
+            .limit(1)
+        )
+    ).scalars().first()
+    if active_job:
+        return {"ok": True, "skipped": True, "reason": "indexing already in progress", "job_id": active_job.id}
+
+    _cache_invalidate_repo(repo.id)
+    job = IndexJob(repository_id=repo.id, status=JobStatus.PENDING.value, progress=0,
+                   current_step="En cola (disparado por webhook de GitLab)...")
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+
+    background_tasks.add_task(
+        run_index_job, job.id, repo.gitlab_url, repo.project_path,
+        settings.gitlab_default_token, None, False,
+    )
+    return {"ok": True, "job_id": job.id}
 
 
 @router.delete("/repositories/{repo_id}")
@@ -354,6 +578,7 @@ async def delete_repository(repo_id: int, session: AsyncSession = Depends(get_se
     repo = await session.get(Repository, repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+    _cache_invalidate_repo(repo_id)
     await session.delete(repo)
     await session.commit()
     # Clean up Qdrant collection so vector data doesn't accumulate indefinitely

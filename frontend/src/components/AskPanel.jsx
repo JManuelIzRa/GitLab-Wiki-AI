@@ -57,19 +57,55 @@ export function AskPanel({ repositoryId, ragAvailable }) {
     const q = question.trim();
     if (!q || loading) return;
 
-    setMessages((prev) => [...prev, { role: "user", text: q }]);
     setQuestion("");
     setLoading(true);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: q },
+      { role: "assistant", text: "", sources: [], streaming: true },
+    ]);
 
     try {
-      const res = await api.askQuestion(repositoryId, q);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: res.answer, sources: res.sources || [] },
-      ]);
+      for await (const event of api.streamAskQuestion(repositoryId, q)) {
+        if (event.token !== undefined) {
+          setMessages((prev) => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (last?.streaming) {
+              copy[copy.length - 1] = { ...last, text: last.text + event.token };
+            }
+            return copy;
+          });
+        } else if (event.sources !== undefined) {
+          setMessages((prev) => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (last?.streaming) {
+              copy[copy.length - 1] = { ...last, sources: event.sources };
+            }
+            return copy;
+          });
+        }
+      }
     } catch (err) {
-      setMessages((prev) => [...prev, { role: "error", text: err.message }]);
+      setMessages((prev) => {
+        const copy = [...prev];
+        if (copy[copy.length - 1]?.streaming) {
+          copy[copy.length - 1] = { role: "error", text: err.message };
+        } else {
+          copy.push({ role: "error", text: err.message });
+        }
+        return copy;
+      });
     } finally {
+      setMessages((prev) => {
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        if (last?.streaming) {
+          copy[copy.length - 1] = { ...last, streaming: false };
+        }
+        return copy;
+      });
       setLoading(false);
     }
   };
@@ -131,7 +167,9 @@ export function AskPanel({ repositoryId, ragAvailable }) {
             )}
           </div>
         ))}
-        {loading && <div style={{ ...styles.message, ...styles.thinking }}>pensando…</div>}
+        {loading && !messages[messages.length - 1]?.streaming && (
+          <div style={{ ...styles.message, ...styles.thinking }}>pensando…</div>
+        )}
       </div>
 
       <form onSubmit={handleAsk} style={styles.inputRow}>

@@ -146,7 +146,11 @@ class GitLabClient:
             next_page = resp.headers.get("x-next-page")
             if not next_page:
                 break
-            page = int(next_page)
+            try:
+                page = int(next_page)
+            except ValueError:
+                logger.warning("Malformed x-next-page header %r; stopping pagination.", next_page)
+                break
         return files
 
     async def get_file_content(self, project_id: str, file_path: str, branch: str) -> str | None:

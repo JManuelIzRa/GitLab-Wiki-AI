@@ -1,58 +1,222 @@
 """
-Generación de contenido del wiki y respuestas de chat, usando un LLM servido vía un
-endpoint OpenAI-compatible local (ej. llama.cpp / vLLM / LM Studio sirviendo
-qwen2.5-3b-instruct-q4_k_m.gguf en OPENAI_URL).
+Wiki content generation and chat answers via an OpenAI-compatible LLM endpoint.
 
-Estrategia de generación del wiki:
-1. Página "Overview": usa el README (si existe) + resumen de estructura + manifiestos de dependencias.
-2. Página "Arquitectura": usa la lista de módulos + entrypoints + árbol de archivos.
-3. Una página por cada módulo principal (top N por nº de archivos): usa una muestra de archivos
-   de ese módulo (contenido real, recortado a un presupuesto de caracteres) para que la IA
-   explique qué hace, no solo liste archivos.
-4. Página "Cómo ejecutar el proyecto": usa manifiestos de dependencias + configs (Docker, CI) + README.
+Generation strategy:
+1. "Overview" page  – README + structure summary + dependency manifests.
+2. "Architecture"   – module list + entrypoints + file tree.
+3. One page per top-N module: real file samples (budget-capped).
+4. "Setup guide"    – dependency manifests + CI/Docker configs + README.
 
-Como el modelo configurado es un modelo local pequeño (3B cuantizado), los prompts se
-mantienen deliberadamente acotados (ver max_chars_per_ai_call en config.py) — un modelo
-de este tamaño degrada mucho con contextos largos, a diferencia de modelos grandes en la nube.
+For free-form repo questions (answer_question_rag / stream_answer_question_rag),
+RAG is used: the caller supplies code chunks retrieved from Qdrant, and this
+module only builds the final prompt and calls the LLM.
 
-Para preguntas libres sobre el repo (answer_question), en vez de pasar todo el wiki se usa
-RAG: el caller (routes.py) ya trae los chunks de código más relevantes recuperados de Qdrant
-y este módulo solo se encarga de construir el prompt y llamar al LLM.
+Language support: set WIKI_LANGUAGE in config (ISO code, e.g. "es", "en").
+Full ES and EN prompt sets are defined below; other codes get EN prompts with
+the target language injected into the system instruction.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
+from typing import AsyncGenerator
 
 import httpx
+import openai
 from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.services.structure_analyzer import RepoStructure, ModuleInfo
 from app.services.vector_store import RetrievedChunk
 
-SYSTEM_PROMPT = """Eres un ingeniero de software senior que escribe documentación técnica clara y precisa \
-para un wiki interno de un repositorio de código (estilo DeepWiki).
+logger = logging.getLogger(__name__)
 
-Reglas:
-- Responde SIEMPRE en español, en formato Markdown limpio (sin envolver todo en bloques de código).
-- Usa encabezados (##, ###), listas y bloques de código con el lenguaje correcto cuando muestres código.
-- Si necesitas representar un flujo o arquitectura, usa un bloque ```mermaid``` con un diagrama válido \
-(flowchart, sequenceDiagram o classDiagram).
-- Basa tus afirmaciones únicamente en el código y archivos proporcionados. Si algo no es evidente \
-en el contexto dado, dilo explícitamente en vez de inventarlo.
-- Sé concreto: nombra archivos, funciones y rutas reales que aparezcan en el contexto.
-- No incluyas un título h1 al inicio (el título de la página ya se muestra aparte); empieza directo \
-con el contenido."""
+# ---------------------------------------------------------------------------
+# Prompt sets keyed by ISO language code.
+# Each entry is a dict with keys: system, chat_system, overview, architecture,
+# module, setup, rag_context (template for the RAG user prompt).
+# ---------------------------------------------------------------------------
 
-CHAT_SYSTEM_PROMPT = """Eres un asistente que responde preguntas sobre un repositorio de código específico. \
-Tienes acceso a fragmentos reales de código recuperados por búsqueda semántica y al wiki ya generado \
-del proyecto. Responde SIEMPRE en español, de forma directa y concisa, en Markdown.
+_PROMPTS: dict[str, dict[str, str]] = {
+    "es": {
+        "system": (
+            "Eres un ingeniero de software senior que escribe documentación técnica clara y precisa "
+            "para un wiki interno de un repositorio de código (estilo DeepWiki).\n\n"
+            "Reglas:\n"
+            "- Responde SIEMPRE en español, en formato Markdown limpio (sin envolver todo en bloques de código).\n"
+            "- Usa encabezados (##, ###), listas y bloques de código con el lenguaje correcto cuando muestres código.\n"
+            "- Si necesitas representar un flujo o arquitectura, usa un bloque ```mermaid``` con un diagrama válido "
+            "(flowchart, sequenceDiagram o classDiagram).\n"
+            "- Basa tus afirmaciones únicamente en el código y archivos proporcionados. Si algo no es evidente "
+            "en el contexto dado, dilo explícitamente en vez de inventarlo.\n"
+            "- Sé concreto: nombra archivos, funciones y rutas reales que aparezcan en el contexto.\n"
+            "- No incluyas un título h1 al inicio (el título de la página ya se muestra aparte); empieza directo "
+            "con el contenido."
+        ),
+        "chat_system": (
+            "Eres un asistente que responde preguntas sobre un repositorio de código específico. "
+            "Tienes acceso a fragmentos reales de código recuperados por búsqueda semántica y al wiki ya generado "
+            "del proyecto. Responde SIEMPRE en español, de forma directa y concisa, en Markdown.\n\n"
+            "Reglas:\n"
+            "- Basa tu respuesta únicamente en el contexto proporcionado (fragmentos de código + wiki).\n"
+            "- Si el contexto no contiene la respuesta, dilo explícitamente en vez de inventar.\n"
+            "- Si citas código, indica de qué archivo proviene.\n"
+            "- No repitas el contexto completo, sintetiza la respuesta."
+        ),
+        "overview": (
+            "Genera la página \"Overview\" del wiki para el proyecto `{project_name}`.\n\n"
+            "Contexto estructural:\n"
+            "- Total de archivos indexados: {total_files}\n"
+            "- Lenguajes detectados: {lang_summary}\n"
+            "- Gestores de dependencias detectados: {package_managers}\n"
+            "- Manifiestos de dependencias: {dependency_manifests}\n\n"
+            "README del proyecto (puede estar vacío o ausente):\n"
+            "{readme}\n\n"
+            "Escribe una página de overview que explique: qué es el proyecto, su propósito principal, "
+            "el stack tecnológico, y una visión general de alto nivel de cómo está organizado. "
+            "Incluye una sección \"## Stack tecnológico\" con el lenguaje/framework detectado."
+        ),
+        "architecture": (
+            "Genera la página \"Arquitectura\" del wiki para el proyecto `{project_name}`.\n\n"
+            "Módulos/directorios principales detectados (por heurística de carpetas):\n"
+            "{modules_desc}\n\n"
+            "Puntos de entrada probables: {entrypoints}\n\n"
+            "Archivos de configuración detectados (CI/CD, contenedores): {config_files}\n\n"
+            "Escribe una página de arquitectura que explique cómo se relacionan estos módulos entre sí, "
+            "cuál parece ser el flujo principal de la aplicación, y dónde está cada responsabilidad "
+            "(ej. API, lógica de negocio, acceso a datos, frontend, infraestructura). "
+            "Incluye un diagrama ```mermaid``` tipo flowchart que represente la arquitectura de alto nivel "
+            "inferida de estos módulos."
+        ),
+        "module": (
+            "Genera la página de wiki para el módulo `{module_path}` del proyecto `{project_name}`.\n\n"
+            "Este módulo contiene {file_count} archivos en total. Lenguajes: {languages}.\n\n"
+            "A continuación el contenido real de una muestra representativa de archivos de este módulo:\n\n"
+            "{files_context}\n\n"
+            "Explica: el propósito de este módulo dentro del proyecto, sus componentes/archivos clave y qué hace cada uno, "
+            "y cómo se conecta probablemente con el resto del sistema. Si ves funciones o clases relevantes, "
+            "nómbralas explícitamente y explica su rol."
+        ),
+        "setup": (
+            "Genera la página \"Cómo ejecutar el proyecto\" del wiki para `{project_name}`.\n\n"
+            "Gestores de dependencias detectados: {package_managers}\n"
+            "Archivos de configuración (Docker/CI): {config_files}\n\n"
+            "Contenido de los manifiestos de dependencias encontrados:\n"
+            "{manifests_context}\n\n"
+            "Fragmento del README (si menciona instalación o ejecución):\n"
+            "{readme}\n\n"
+            "Escribe una guía práctica de instalación y ejecución local: requisitos previos, pasos de instalación "
+            "de dependencias, comandos para ejecutar el proyecto y, si es detectable, cómo correr pruebas. "
+            "Si la información disponible no permite saber algo con certeza, indícalo en vez de inventar comandos."
+        ),
+        "rag_context": (
+            "Proyecto: `{project_name}`\n\n"
+            "{wiki_block}"
+            "--- FRAGMENTOS DE CÓDIGO RELEVANTES (recuperados por búsqueda semántica) ---\n"
+            "{code_context}\n"
+            "--- FIN FRAGMENTOS ---\n\n"
+            "Pregunta del usuario: {question}"
+        ),
+    },
+    "en": {
+        "system": (
+            "You are a senior software engineer writing clear and precise technical documentation "
+            "for an internal code repository wiki (DeepWiki style).\n\n"
+            "Rules:\n"
+            "- Always respond in English, in clean Markdown format (do not wrap everything in code blocks).\n"
+            "- Use headings (##, ###), lists, and code blocks with the correct language when showing code.\n"
+            "- If you need to represent a flow or architecture, use a ```mermaid``` block with a valid diagram "
+            "(flowchart, sequenceDiagram, or classDiagram).\n"
+            "- Base your statements only on the code and files provided. If something is not evident in the "
+            "given context, say so explicitly instead of making it up.\n"
+            "- Be concrete: name real files, functions, and paths that appear in the context.\n"
+            "- Do not include an h1 heading at the start (the page title is displayed separately); "
+            "start directly with the content."
+        ),
+        "chat_system": (
+            "You are an assistant answering questions about a specific code repository. "
+            "You have access to real code snippets retrieved by semantic search and the already-generated "
+            "project wiki. Always respond in English, concisely and directly, in Markdown.\n\n"
+            "Rules:\n"
+            "- Base your answer only on the provided context (code snippets + wiki).\n"
+            "- If the context does not contain the answer, say so explicitly instead of making it up.\n"
+            "- If you quote code, mention which file it comes from.\n"
+            "- Do not repeat the full context; synthesize the answer."
+        ),
+        "overview": (
+            "Generate the \"Overview\" wiki page for project `{project_name}`.\n\n"
+            "Structural context:\n"
+            "- Total indexed files: {total_files}\n"
+            "- Detected languages: {lang_summary}\n"
+            "- Detected package managers: {package_managers}\n"
+            "- Dependency manifests: {dependency_manifests}\n\n"
+            "Project README (may be empty or absent):\n"
+            "{readme}\n\n"
+            "Write an overview page explaining: what the project is, its main purpose, "
+            "the technology stack, and a high-level view of how it is organized. "
+            "Include a \"## Tech Stack\" section with the detected language/framework."
+        ),
+        "architecture": (
+            "Generate the \"Architecture\" wiki page for project `{project_name}`.\n\n"
+            "Main modules/directories detected (by folder heuristic):\n"
+            "{modules_desc}\n\n"
+            "Likely entry points: {entrypoints}\n\n"
+            "Detected configuration files (CI/CD, containers): {config_files}\n\n"
+            "Write an architecture page explaining how these modules relate to each other, "
+            "what the main application flow appears to be, and where each responsibility lives "
+            "(e.g. API, business logic, data access, frontend, infrastructure). "
+            "Include a ```mermaid``` flowchart diagram representing the high-level architecture "
+            "inferred from these modules."
+        ),
+        "module": (
+            "Generate the wiki page for module `{module_path}` of project `{project_name}`.\n\n"
+            "This module contains {file_count} files in total. Languages: {languages}.\n\n"
+            "Below is the actual content of a representative sample of files from this module:\n\n"
+            "{files_context}\n\n"
+            "Explain: the purpose of this module within the project, its key components/files and what each does, "
+            "and how it likely connects with the rest of the system. If you see relevant functions or classes, "
+            "name them explicitly and explain their role."
+        ),
+        "setup": (
+            "Generate the \"How to run the project\" wiki page for `{project_name}`.\n\n"
+            "Detected package managers: {package_managers}\n"
+            "Configuration files (Docker/CI): {config_files}\n\n"
+            "Contents of detected dependency manifests:\n"
+            "{manifests_context}\n\n"
+            "README excerpt (if it mentions installation or running):\n"
+            "{readme}\n\n"
+            "Write a practical local installation and execution guide: prerequisites, dependency installation "
+            "steps, commands to run the project, and if detectable, how to run tests. "
+            "If the available information does not allow certainty about something, say so instead of inventing commands."
+        ),
+        "rag_context": (
+            "Project: `{project_name}`\n\n"
+            "{wiki_block}"
+            "--- RELEVANT CODE SNIPPETS (retrieved by semantic search) ---\n"
+            "{code_context}\n"
+            "--- END SNIPPETS ---\n\n"
+            "User question: {question}"
+        ),
+    },
+}
 
-Reglas:
-- Basa tu respuesta únicamente en el contexto proporcionado (fragmentos de código + wiki).
-- Si el contexto no contiene la respuesta, dilo explícitamente en vez de inventar.
-- Si citas código, indica de qué archivo proviene.
-- No repitas el contexto completo, sintetiza la respuesta."""
+
+def _get_prompts(language: str) -> dict[str, str]:
+    """Return the prompt set for the given ISO language code, falling back to English."""
+    lang = language.lower()
+    if lang in _PROMPTS:
+        return _PROMPTS[lang]
+    # Unknown language: use English prompts but override the language instruction.
+    lang_name = lang.capitalize()
+    prompts = dict(_PROMPTS["en"])
+    prompts["system"] = prompts["system"].replace(
+        "Always respond in English", f"Always respond in {lang_name}"
+    )
+    prompts["chat_system"] = prompts["chat_system"].replace(
+        "Always respond in English", f"Always respond in {lang_name}"
+    )
+    return prompts
 
 
 @dataclass
@@ -64,30 +228,28 @@ class FileSnippet:
 def _truncate(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
-    return text[:max_chars] + "\n... [contenido truncado] ..."
+    return text[:max_chars] + "\n... [truncated] ..."
 
 
 def _budget_snippets(snippets: list[FileSnippet], max_chars: int) -> str:
-    """Concatena snippets de archivo respetando un presupuesto total de caracteres."""
     parts = []
     remaining = max_chars
     for s in snippets:
         if remaining <= 0:
             break
         chunk = _truncate(s.content, min(remaining, 8000))
-        parts.append(f"### Archivo: `{s.path}`\n```\n{chunk}\n```")
+        parts.append(f"### File: `{s.path}`\n```\n{chunk}\n```")
         remaining -= len(chunk)
     return "\n\n".join(parts)
 
 
 def _format_retrieved_chunks(chunks: list[RetrievedChunk]) -> str:
-    """Formatea los chunks de código recuperados de Qdrant para insertarlos en un prompt."""
     if not chunks:
-        return "(no se encontraron fragmentos de código relevantes)"
+        return "(no relevant code snippets found)"
     parts = []
     for c in chunks:
         parts.append(
-            f"### `{c.file_path}` (líneas {c.start_line}-{c.end_line}, relevancia {c.score:.2f})\n"
+            f"### `{c.file_path}` (lines {c.start_line}-{c.end_line}, score {c.score:.2f})\n"
             f"```\n{c.content}\n```"
         )
     return "\n\n".join(parts)
@@ -101,79 +263,86 @@ class WikiGenerator:
             timeout=httpx.Timeout(60.0),
         )
         self.model = model or settings.openai_chat_model
+        self._p = _get_prompts(settings.wiki_language)
 
     async def close(self) -> None:
         await self._client.close()
 
-    async def _ask(self, user_prompt: str, system_prompt: str = SYSTEM_PROMPT, max_tokens: int | None = None) -> str:
-        response = await self._client.chat.completions.create(
-            model=self.model,
-            max_completion_tokens=max_tokens or settings.max_chat_tokens,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        return response.choices[0].message.content or ""
+    # ------------------------------------------------------------------
+    # Core LLM call with exponential-backoff retry
+    # ------------------------------------------------------------------
+
+    async def _ask(self, user_prompt: str, system_prompt: str | None = None, max_tokens: int | None = None) -> str:
+        effective_system = system_prompt if system_prompt is not None else self._p["system"]
+        _retryable = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError)
+        last_exc: Exception | None = None
+        for attempt in range(4):
+            try:
+                response = await self._client.chat.completions.create(
+                    model=self.model,
+                    max_completion_tokens=max_tokens or settings.max_chat_tokens,
+                    messages=[
+                        {"role": "system", "content": effective_system},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+                return response.choices[0].message.content or ""
+            except openai.RateLimitError as exc:
+                last_exc = exc
+                wait = 2 ** (attempt + 2)
+                logger.warning("LLM rate limited (attempt %d/4) — retrying in %ds", attempt + 1, wait)
+                await asyncio.sleep(wait)
+            except _retryable as exc:
+                last_exc = exc
+                wait = 2 ** attempt
+                logger.warning("LLM request failed (attempt %d/4): %s — retrying in %ds", attempt + 1, exc, wait)
+                await asyncio.sleep(wait)
+        raise last_exc  # type: ignore[misc]
+
+    # ------------------------------------------------------------------
+    # Wiki page generators
+    # ------------------------------------------------------------------
 
     async def generate_overview(
         self, project_name: str, structure: RepoStructure, readme_content: str | None
     ) -> str:
-        lang_summary = ", ".join(f"{lang} ({count} archivos)" for lang, count in list(structure.languages.items())[:8])
-        prompt = f"""Genera la página "Overview" del wiki para el proyecto `{project_name}`.
-
-Contexto estructural:
-- Total de archivos indexados: {structure.total_files}
-- Lenguajes detectados: {lang_summary or "no determinado"}
-- Gestores de dependencias detectados: {", ".join(structure.package_managers) or "ninguno detectado"}
-- Manifiestos de dependencias: {", ".join(structure.dependency_manifests) or "ninguno"}
-
-README del proyecto (puede estar vacío o ausente):
-{_truncate(readme_content or "(no se encontró README)", settings.max_chars_per_ai_call)}
-
-Escribe una página de overview que explique: qué es el proyecto, su propósito principal, \
-el stack tecnológico, y una visión general de alto nivel de cómo está organizado. \
-Incluye una sección "## Stack tecnológico" con el lenguaje/framework detectado."""
+        lang_summary = ", ".join(f"{lang} ({count} files)" for lang, count in list(structure.languages.items())[:8])
+        prompt = self._p["overview"].format(
+            project_name=project_name,
+            total_files=structure.total_files,
+            lang_summary=lang_summary or "undetermined",
+            package_managers=", ".join(structure.package_managers) or "none detected",
+            dependency_manifests=", ".join(structure.dependency_manifests) or "none",
+            readme=_truncate(readme_content or "(no README found)", settings.max_chars_per_ai_call),
+        )
         return await self._ask(prompt)
 
     async def generate_architecture(self, project_name: str, structure: RepoStructure) -> str:
         modules_desc = "\n".join(
-            f"- `{m.path}` ({m.file_count} archivos, lenguajes: {', '.join(m.languages) or 'n/a'}). "
-            f"Ejemplos: {', '.join(m.sample_files[:5])}"
+            f"- `{m.path}` ({m.file_count} files, languages: {', '.join(m.languages) or 'n/a'}). "
+            f"Examples: {', '.join(m.sample_files[:5])}"
             for m in structure.modules[:25]
         )
-        entrypoints = ", ".join(structure.entrypoints) or "no se detectaron puntos de entrada obvios"
-        prompt = f"""Genera la página "Arquitectura" del wiki para el proyecto `{project_name}`.
-
-Módulos/directorios principales detectados (por heurística de carpetas):
-{modules_desc}
-
-Puntos de entrada probables: {entrypoints}
-
-Archivos de configuración detectados (CI/CD, contenedores): {", ".join(structure.config_files) or "ninguno"}
-
-Escribe una página de arquitectura que explique cómo se relacionan estos módulos entre sí, \
-cuál parece ser el flujo principal de la aplicación, y dónde está cada responsabilidad \
-(ej. API, lógica de negocio, acceso a datos, frontend, infraestructura). \
-Incluye un diagrama ```mermaid``` tipo flowchart que represente la arquitectura de alto nivel \
-inferida de estos módulos."""
+        entrypoints = ", ".join(structure.entrypoints) or "no obvious entry points detected"
+        prompt = self._p["architecture"].format(
+            project_name=project_name,
+            modules_desc=modules_desc,
+            entrypoints=entrypoints,
+            config_files=", ".join(structure.config_files) or "none",
+        )
         return await self._ask(prompt)
 
     async def generate_module_page(
         self, project_name: str, module: ModuleInfo, snippets: list[FileSnippet]
     ) -> str:
         files_context = _budget_snippets(snippets, settings.max_chars_per_ai_call)
-        prompt = f"""Genera la página de wiki para el módulo `{module.path}` del proyecto `{project_name}`.
-
-Este módulo contiene {module.file_count} archivos en total. Lenguajes: {', '.join(module.languages) or 'n/a'}.
-
-A continuación el contenido real de una muestra representativa de archivos de este módulo:
-
-{files_context}
-
-Explica: el propósito de este módulo dentro del proyecto, sus componentes/archivos clave y qué hace cada uno, \
-y cómo se conecta probablemente con el resto del sistema. Si ves funciones o clases relevantes, \
-nómbralas explícitamente y explica su rol."""
+        prompt = self._p["module"].format(
+            project_name=project_name,
+            module_path=module.path,
+            file_count=module.file_count,
+            languages=", ".join(module.languages) or "n/a",
+            files_context=files_context,
+        )
         return await self._ask(prompt)
 
     async def generate_setup_guide(
@@ -184,21 +353,37 @@ nómbralas explícitamente y explica su rol."""
         readme_content: str | None,
     ) -> str:
         manifests_context = _budget_snippets(manifest_contents, settings.max_chars_per_ai_call)
-        prompt = f"""Genera la página "Cómo ejecutar el proyecto" del wiki para `{project_name}`.
-
-Gestores de dependencias detectados: {", ".join(structure.package_managers) or "ninguno detectado"}
-Archivos de configuración (Docker/CI): {", ".join(structure.config_files) or "ninguno"}
-
-Contenido de los manifiestos de dependencias encontrados:
-{manifests_context or "(no se encontraron manifiestos legibles)"}
-
-Fragmento del README (si menciona instalación o ejecución):
-{_truncate(readme_content or "(sin README)", 4000)}
-
-Escribe una guía práctica de instalación y ejecución local: requisitos previos, pasos de instalación \
-de dependencias, comandos para ejecutar el proyecto y, si es detectable, cómo correr pruebas. \
-Si la información disponible no permite saber algo con certeza, indícalo en vez de inventar comandos."""
+        prompt = self._p["setup"].format(
+            project_name=project_name,
+            package_managers=", ".join(structure.package_managers) or "none detected",
+            config_files=", ".join(structure.config_files) or "none",
+            manifests_context=manifests_context or "(no readable manifests found)",
+            readme=_truncate(readme_content or "(no README)", 4000),
+        )
         return await self._ask(prompt)
+
+    # ------------------------------------------------------------------
+    # RAG chat — non-streaming and streaming variants
+    # ------------------------------------------------------------------
+
+    def _build_rag_prompt(
+        self,
+        project_name: str,
+        question: str,
+        retrieved_chunks: list[RetrievedChunk],
+        wiki_summary: str = "",
+    ) -> str:
+        code_context = _format_retrieved_chunks(retrieved_chunks)
+        wiki_block = (
+            f"--- WIKI SUMMARY ---\n{_truncate(wiki_summary, 3000)}\n--- END WIKI SUMMARY ---\n\n"
+            if wiki_summary else ""
+        )
+        return self._p["rag_context"].format(
+            project_name=project_name,
+            wiki_block=wiki_block,
+            code_context=_truncate(code_context, settings.max_chars_per_ai_call),
+            question=question,
+        )
 
     async def answer_question_rag(
         self,
@@ -207,21 +392,46 @@ Si la información disponible no permite saber algo con certeza, indícalo en ve
         retrieved_chunks: list[RetrievedChunk],
         wiki_summary: str = "",
     ) -> str:
-        """
-        Responde una pregunta usando RAG real: el caller ya recuperó los chunks de código
-        más relevantes de Qdrant (por similitud semántica con la pregunta) y opcionalmente
-        un resumen breve del wiki ya generado. Este método solo construye el prompt final.
-        """
-        code_context = _format_retrieved_chunks(retrieved_chunks)
-        wiki_block = (
-            f"--- RESUMEN DEL WIKI ---\n{_truncate(wiki_summary, 3000)}\n--- FIN RESUMEN ---\n"
-            if wiki_summary else ""
-        )
-        prompt = f"""Proyecto: `{project_name}`
+        prompt = self._build_rag_prompt(project_name, question, retrieved_chunks, wiki_summary)
+        return await self._ask(prompt, system_prompt=self._p["chat_system"])
 
-{wiki_block}--- FRAGMENTOS DE CÓDIGO RELEVANTES (recuperados por búsqueda semántica) ---
-{_truncate(code_context, settings.max_chars_per_ai_call)}
---- FIN FRAGMENTOS ---
+    async def stream_answer_question_rag(
+        self,
+        project_name: str,
+        question: str,
+        retrieved_chunks: list[RetrievedChunk],
+        wiki_summary: str = "",
+    ) -> AsyncGenerator[str, None]:
+        """Stream answer tokens as they arrive from the LLM. Retries connection (not mid-stream)."""
+        prompt = self._build_rag_prompt(project_name, question, retrieved_chunks, wiki_summary)
+        messages = [
+            {"role": "system", "content": self._p["chat_system"]},
+            {"role": "user", "content": prompt},
+        ]
 
-Pregunta del usuario: {question}"""
-        return await self._ask(prompt, system_prompt=CHAT_SYSTEM_PROMPT)
+        _retryable = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError)
+        stream = None
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                stream = await self._client.chat.completions.create(
+                    model=self.model,
+                    max_completion_tokens=settings.max_chat_tokens,
+                    messages=messages,
+                    stream=True,
+                )
+                break
+            except _retryable as exc:
+                last_exc = exc
+                if attempt < 2:
+                    wait = 2 ** attempt
+                    logger.warning("Streaming connection failed (attempt %d/3): %s — retrying in %ds",
+                                   attempt + 1, exc, wait)
+                    await asyncio.sleep(wait)
+        if stream is None:
+            raise last_exc  # type: ignore[misc]
+
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta

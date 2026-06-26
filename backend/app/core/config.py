@@ -2,8 +2,10 @@
 Configuración central de la aplicación.
 Todos los valores se pueden sobreescribir con variables de entorno o un archivo .env
 """
+import re
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,17 +13,17 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # --- LLM de chat/generación (servidor OpenAI-compatible local) ---
-    openai_url: str = "http://192.168.0.100:8000/"
+    openai_url: str = "http://localhost:8000/"
     openai_chat_model: str = "qwen2.5-3b-instruct-q4_k_m.gguf"
     openai_api_key: str = "not-needed"  # algunos servidores locales exigen un valor no vacío aunque no lo validen
 
     # --- Embeddings (servicio propio, contrato OpenAI: {input, model} -> {data:[{embedding}]}) ---
-    embedding_url: str = "http://192.168.0.100:8080/embed"
+    embedding_url: str = "http://localhost:8080/embed"
     openai_embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 384  # dimensión de text-embedding-3-small; ajustar si tu servicio usa otro modelo
 
     # --- Qdrant (vector store para RAG sobre código) ---
-    qdrant_host: str = "192.168.0.100"
+    qdrant_host: str = "localhost"
     qdrant_port: int = 6333
     qdrant_collection_prefix: str = "deepwiki_repo_"  # se sufija con el id del repo
 
@@ -58,6 +60,37 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     cors_origins: list[str] = ["*"]
+
+    # --- Internacionalización ---
+    # ISO language code for generated wiki content ("es", "en", "fr", "de", "pt", ...).
+    # Affects both system and user prompts sent to the LLM.
+    wiki_language: str = "es"
+
+    # --- Webhooks de GitLab ---
+    # Token que GitLab envía en la cabecera X-Gitlab-Token para autenticar el webhook.
+    # Deja vacío para deshabilitar la validación (solo recomendable en desarrollo local).
+    gitlab_webhook_secret: str = ""
+    # PAT usado para re-indexar repos disparados por webhook. Debe tener scope read_api + read_repository.
+    # Si está vacío, los webhooks de push solo marcan el repo como desactualizado pero no re-indexan.
+    gitlab_default_token: str = ""
+
+    # --- Rate limiting ---
+    rate_limit_index: str = "5/minute"   # máx. jobs de indexado nuevos por IP
+    rate_limit_chat: str = "30/minute"   # máx. preguntas de chat por IP
+
+    @field_validator("openai_url", "embedding_url")
+    @classmethod
+    def _validate_http_url(cls, v: str) -> str:
+        if not re.match(r"^https?://", v, re.IGNORECASE):
+            raise ValueError(f"must start with http:// or https:// (got: {v!r})")
+        return v
+
+    @field_validator("qdrant_host")
+    @classmethod
+    def _validate_qdrant_host(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("QDRANT_HOST must not be empty")
+        return v
 
 
 settings = Settings()

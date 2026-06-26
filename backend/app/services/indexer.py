@@ -134,22 +134,54 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
         new_pages: list[WikiPage] = []
         order_counter = 0
 
+        # Load existing pages for incremental regeneration: if a page's source hash
+        # hasn't changed since the last run, we reuse its content instead of calling the LLM.
+        existing_pages: dict[str, WikiPage] = {
+            p.slug: p
+            for p in (
+                await session.execute(select(WikiPage).where(WikiPage.repository_id == repo.id))
+            ).scalars().all()
+        }
+
         try:
             # --- 5. Página: Overview ---
             await _update_job(session, job, status=JobStatus.GENERATING.value, progress=45, step="Generando página: Overview...")
-            overview_md = await generator.generate_overview(project.name, structure, readme_content)
+            lang_summary = ", ".join(f"{l}:{c}" for l, c in list(structure.languages.items())[:8])
+            overview_hash = _compute_source_hash(
+                readme_content or "",
+                lang_summary,
+                ",".join(structure.package_managers),
+                ",".join(structure.dependency_manifests),
+            )
+            overview_md = (
+                _reuse_if_unchanged("overview", overview_hash, existing_pages, force_reindex)
+                or await generator.generate_overview(project.name, structure, readme_content)
+            )
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="overview", title="Overview", order=order_counter,
                 content_markdown=overview_md, source_files=[structure.readme_path] if structure.readme_path else [],
+                source_hash=overview_hash,
             ))
             order_counter += 1
 
             # --- 6. Página: Arquitectura ---
             await _update_job(session, job, progress=55, step="Generando página: Arquitectura...")
-            arch_md = await generator.generate_architecture(project.name, structure)
+            modules_desc_key = "|".join(
+                f"{m.path}:{m.file_count}:{','.join(m.languages)}" for m in structure.modules[:25]
+            )
+            arch_hash = _compute_source_hash(
+                modules_desc_key,
+                ",".join(structure.entrypoints),
+                ",".join(structure.config_files),
+            )
+            arch_md = (
+                _reuse_if_unchanged("architecture", arch_hash, existing_pages, force_reindex)
+                or await generator.generate_architecture(project.name, structure)
+            )
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="architecture", title="Arquitectura", order=order_counter,
                 content_markdown=arch_md, source_files=[m.path for m in structure.modules[:25]],
+                source_hash=arch_hash,
             ))
             order_counter += 1
 
@@ -172,14 +204,18 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 ]
                 if not snippets:
                     return None
-                async with _llm_sem:
-                    module_md = await generator.generate_module_page(project.name, module, snippets)
                 slug = "module-" + module.path.replace("/", "-").lower()
+                mod_hash = _compute_source_hash(*(s.content for s in snippets))
+                cached = _reuse_if_unchanged(slug, mod_hash, existing_pages, force_reindex)
+                if cached is None:
+                    async with _llm_sem:
+                        cached = await generator.generate_module_page(project.name, module, snippets)
                 return WikiPage(
                     repository_id=repo.id, slug=slug, title=f"Módulo: {module.path}",
                     order=0,  # filled in below after sorting
-                    parent_slug="modules", content_markdown=module_md,
+                    parent_slug="modules", content_markdown=cached,
                     source_files=[s.path for s in snippets],
+                    source_hash=mod_hash,
                 )
 
             module_pages = await asyncio.gather(*[_process_module(m) for m in top_modules])
@@ -191,10 +227,19 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
 
             # --- 8. Página: Cómo ejecutar el proyecto ---
             await _update_job(session, job, progress=80, step="Generando página: Cómo ejecutar el proyecto...")
-            setup_md = await generator.generate_setup_guide(project.name, structure, manifest_snippets, readme_content)
+            setup_hash = _compute_source_hash(
+                *(s.content for s in manifest_snippets),
+                readme_content or "",
+                ",".join(structure.package_managers),
+            )
+            setup_md = (
+                _reuse_if_unchanged("setup", setup_hash, existing_pages, force_reindex)
+                or await generator.generate_setup_guide(project.name, structure, manifest_snippets, readme_content)
+            )
             new_pages.append(WikiPage(
                 repository_id=repo.id, slug="setup", title="Cómo ejecutar el proyecto", order=order_counter,
                 content_markdown=setup_md, source_files=structure.dependency_manifests,
+                source_hash=setup_hash,
             ))
 
         finally:
@@ -293,6 +338,26 @@ def _compute_file_hashes(file_contents: dict[str, str]) -> dict[str, str]:
         path: hashlib.sha256(content.encode(errors="replace")).hexdigest()
         for path, content in file_contents.items()
     }
+
+
+def _compute_source_hash(*texts: str | None) -> str:
+    combined = "\n---\n".join(t for t in texts if t)
+    return hashlib.sha256(combined.encode(errors="replace")).hexdigest()[:16]
+
+
+def _reuse_if_unchanged(
+    slug: str,
+    source_hash: str,
+    existing_pages: dict[str, "WikiPage"],
+    force_reindex: bool,
+) -> str | None:
+    if force_reindex:
+        return None
+    existing = existing_pages.get(slug)
+    if existing and existing.source_hash == source_hash:
+        logger.info("Skipping LLM for page '%s' (source_hash=%s)", slug, source_hash)
+        return existing.content_markdown
+    return None
 
 
 async def _embed_repository_code(

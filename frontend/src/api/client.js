@@ -71,6 +71,61 @@ export const api = {
   askQuestion: (repoId, question) =>
     request(`/api/repositories/${repoId}/chat`, { method: "POST", body: JSON.stringify({ question }) }),
 
+  /**
+   * Async generator that yields parsed SSE events from the streaming chat endpoint.
+   * Yields: { token: string } for answer tokens, { sources: CodeSource[] } for source metadata.
+   * Throws ApiError on HTTP error or stream-level error event.
+   */
+  streamAskQuestion: async function* (repoId, question) {
+    const res = await fetch(`${API_BASE}/api/repositories/${repoId}/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(body.detail || `Error ${res.status}`, res.status);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let currentEvent = "";
+    let currentData = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
+          currentData += (currentData ? "\n" : "") + line.slice(6);
+        } else if (line === "") {
+          if (currentData) {
+            try {
+              const parsed = JSON.parse(currentData);
+              if (currentEvent === "sources") {
+                yield { sources: parsed };
+              } else if (currentEvent === "done") {
+                return;
+              } else if (currentEvent === "error") {
+                throw new ApiError(parsed.message || "Stream error", 500);
+              } else {
+                yield parsed;
+              }
+            } catch (e) {
+              if (e instanceof ApiError) throw e;
+            }
+          }
+          currentEvent = "";
+          currentData = "";
+        }
+      }
+    }
+  },
+
   searchCode: (repoId, query, topK) =>
     request(`/api/repositories/${repoId}/search`, {
       method: "POST",

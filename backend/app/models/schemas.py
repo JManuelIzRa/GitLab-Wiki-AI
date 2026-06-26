@@ -126,3 +126,12 @@ class WikiPageUpdate(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[CodeSource] = []
+
+
+class GitLabWebhookPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    object_kind: str = ""
+    ref: str = ""
+    checkout_sha: str = ""
+    project: dict = Field(default_factory=dict)
