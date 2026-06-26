@@ -21,18 +21,21 @@ frontend/   SPA en React + Vite: formulario de conexión, progreso de indexado, 
 3. Un **analizador estático** (sin IA) detecta lenguajes, gestores de dependencias
    (package.json, requirements.txt, pom.xml, go.mod, etc.), agrupa archivos en módulos
    por carpeta y detecta puntos de entrada.
-4. La capa de **IA (API de Claude)** recibe ese contexto estructurado más el contenido
-   real de los archivos relevantes (README, manifiestos, muestras de cada módulo) y
-   genera cada página del wiki en Markdown, incluyendo diagramas Mermaid cuando aplica.
-5. Todo se persiste en SQLite. El **frontend hace polling** del progreso del job y,
-   al terminar, muestra el wiki con sidebar de navegación, render de Markdown/Mermaid/código,
-   y un panel de preguntas libres sobre el contenido ya generado.
+4. Un **LLM** (cualquier servidor OpenAI-compatible: llama.cpp, vLLM, LM Studio con un
+   modelo local, o la API de OpenAI/Anthropic vía proxy) recibe ese contexto estructurado
+   más el contenido real de los archivos relevantes y genera cada página del wiki en
+   Markdown, incluyendo diagramas Mermaid cuando aplica.
+5. Todo se persiste en SQLite. El **frontend recibe el progreso del job en tiempo real
+   vía Server-Sent Events** y, al terminar, muestra el wiki con sidebar de navegación,
+   render de Markdown/Mermaid/código, y un panel de preguntas libres sobre el contenido
+   ya generado.
 
 ## Requisitos
 
 - Python 3.11+
 - Node.js 18+
-- Una API key de [Anthropic](https://console.anthropic.com/) (para la generación con IA)
+- Un servidor LLM compatible con la API de OpenAI para generación de wiki y chat RAG
+  (ver opciones en la sección de configuración más abajo)
 - Un Personal Access Token de GitLab con scopes `read_api` y `read_repository`
 
 ## Backend
@@ -42,7 +45,7 @@ cd backend
 pip install -r requirements.txt
 
 cp .env.example .env
-# Edita .env y pon tu ANTHROPIC_API_KEY
+# Edita .env con la URL y modelo de tu servidor LLM (ver tabla más abajo)
 
 uvicorn app.main:app --reload --port 8000
 ```
@@ -52,13 +55,30 @@ La API queda en `http://localhost:8000`. Documentación interactiva automática 
 
 ### Variables de entorno (`backend/.env`)
 
-| Variable                | Descripción                                              | Default                              |
-|--------------------------|-----------------------------------------------------------|---------------------------------------|
-| `ANTHROPIC_API_KEY`     | Clave de la API de Anthropic (requerida)                  | —                                      |
-| `ANTHROPIC_MODEL`       | Modelo a usar para generar el wiki                         | `claude-sonnet-4-6`                   |
-| `DATABASE_URL`          | URL de conexión SQLAlchemy (SQLite por defecto)            | `sqlite+aiosqlite:///./deepwiki.db`   |
-| `MAX_FILES_TO_INDEX`    | Tope de archivos a listar por repo (evita timeouts en monorepos) | `400`                          |
-| `MAX_CHARS_PER_AI_CALL` | Presupuesto de contexto por llamada a IA                  | `60000`                               |
+El backend usa un cliente **OpenAI-compatible**, así que puedes apuntar a un modelo local
+(llama.cpp, vLLM, LM Studio, Ollama con `--api openai`) o a cualquier API cloud que
+exponga el mismo contrato (OpenAI, Azure OpenAI, OpenRouter, etc.).
+
+| Variable                          | Descripción                                                                 | Default                              |
+|------------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
+| `OPENAI_URL`                      | URL base del servidor LLM (ej. `http://localhost:8000/` para llama.cpp)     | `http://192.168.0.100:8000/`          |
+| `OPENAI_CHAT_MODEL`               | Nombre del modelo a usar (tal como lo expone el servidor)                   | `qwen2.5-3b-instruct-q4_k_m.gguf`    |
+| `OPENAI_API_KEY`                  | API key (usar `not-needed` para servidores locales sin autenticación)        | `not-needed`                          |
+| `EMBEDDING_URL`                   | URL del servicio de embeddings compatible con la API de OpenAI               | `http://192.168.0.100:8080/embed`     |
+| `QDRANT_HOST` / `QDRANT_PORT`     | Host y puerto de Qdrant para búsqueda semántica                             | `192.168.0.100` / `6333`             |
+| `DATABASE_URL`                    | URL de conexión SQLAlchemy (SQLite por defecto)                             | `sqlite+aiosqlite:///./deepwiki.db`   |
+| `MAX_FILES_TO_INDEX`              | Tope de archivos a listar por repo (evita timeouts en monorepos)             | `400`                                 |
+| `MAX_CHARS_PER_AI_CALL`           | Presupuesto de contexto por llamada al LLM                                  | `12000`                               |
+| `MAX_CONCURRENT_MODULE_GENERATIONS` | LLM calls paralelas al generar páginas de módulo (subir a 6-10 con cloud) | `3`                                   |
+
+**Ejemplo con OpenAI cloud:**
+```
+OPENAI_URL=https://api.openai.com/v1/
+OPENAI_CHAT_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+MAX_CHARS_PER_AI_CALL=60000
+MAX_CONCURRENT_MODULE_GENERATIONS=8
+```
 
 ## Frontend
 
