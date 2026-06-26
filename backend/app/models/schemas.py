@@ -77,6 +77,7 @@ class RepositorySummary(BaseModel):
     indexed_in_qdrant: bool
     is_monorepo: bool = False
     workspace_roots: list[str] | None = None
+    webhook_secret: str = ""
     updated_at: datetime
 
 
@@ -139,6 +140,16 @@ class DependencyGraphResponse(BaseModel):
 
 class WikiPageUpdate(BaseModel):
     content_markdown: str = Field(..., min_length=0, max_length=500_000)
+
+
+class WikiTextSearchResult(BaseModel):
+    slug: str
+    title: str
+    excerpt: str
+
+
+class RepoWebhookSecretUpdate(BaseModel):
+    webhook_secret: str = Field(default="", max_length=128)
 
 
 class ChatResponse(BaseModel):

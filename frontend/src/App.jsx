@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { RepositoryBrowser } from "./components/RepositoryBrowser";
 import { ConnectForm } from "./components/ConnectForm";
 import { GroupConnectForm } from "./components/GroupConnectForm";
@@ -25,6 +25,17 @@ const VIEW = {
 };
 
 function App() {
+  // ---- Theme ----
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => setTheme((t) => (t === "dark" ? "light" : "dark")), []);
+
+  // ---- View state ----
   const [view, setView] = useState(() =>
     localStorage.getItem("activeJobId") ? VIEW.INDEXING : VIEW.BROWSE
   );
@@ -104,15 +115,40 @@ function App() {
     return () => { cancelled = true; };
   }, [view]);
 
+  // ---- Keyboard navigation in wiki view ----
+  useEffect(() => {
+    if (view !== VIEW.WIKI || !pages.length) return;
+
+    const handler = (e) => {
+      // Don't steal keys when user is typing
+      if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+
+      if (e.altKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        setActiveSlug((slug) => {
+          const idx = pages.findIndex((p) => p.slug === slug);
+          return idx > 0 ? pages[idx - 1].slug : slug;
+        });
+      } else if (e.altKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        setActiveSlug((slug) => {
+          const idx = pages.findIndex((p) => p.slug === slug);
+          return idx < pages.length - 1 ? pages[idx + 1].slug : slug;
+        });
+      }
+    };
+
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [view, pages]);
+
   const openExistingRepository = async (repo) => {
     try {
       let structure = null;
       try {
         structure = await api.getWikiStructure(repo.id);
-        // Persist to offline cache for next time
         offlineCache.setStructure(repo.id, structure);
       } catch (netErr) {
-        // Network error — try offline cache
         const cached = await offlineCache.getStructure(repo.id);
         if (cached) {
           structure = cached;
@@ -248,10 +284,8 @@ function App() {
         let page = null;
         try {
           page = await api.getWikiPage(repository.id, activeSlug);
-          // Cache the freshly-loaded page
           offlineCache.setPage(repository.id, activeSlug, page);
         } catch (netErr) {
-          // Network error — serve from offline cache
           const cached = await offlineCache.getPage(repository.id, activeSlug);
           if (cached) {
             page = cached;
@@ -287,7 +321,6 @@ function App() {
   };
 
   const handleUpdatePage = async (slug, newMarkdown, preloadedPage = null) => {
-    // If a preloaded page was passed (e.g. from a revision restore), skip the API call
     const updated = preloadedPage ?? await api.updateWikiPage(repository.id, slug, newMarkdown);
     offlineCache.setPage(repository.id, slug, updated);
     setActivePage(updated);
@@ -380,6 +413,9 @@ function App() {
         onReset={handleReset}
         onOpenSearch={() => setSearchOpen(true)}
         onOpenGraph={() => setGraphOpen(true)}
+        onReindex={handleReindexRepository}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
       <main style={{ flex: 1, height: "100vh", overflowY: "auto" }}>
         {pageLoading && !activePage ? (

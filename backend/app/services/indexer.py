@@ -16,7 +16,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -109,6 +109,7 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
         await _update_job(session, job, progress=15, step="Listando árbol de archivos del repositorio...")
         tree_files = await client.list_repository_tree(project.id, target_branch, settings.max_files_to_index)
         all_paths = [f.path for f in tree_files]
+        _truncated = len(tree_files) >= settings.max_files_to_index
 
         # --- 3. Análisis estático (sin IA) ---
         await _update_job(session, job, status=JobStatus.ANALYZING.value, progress=25, step="Analizando estructura del repositorio...")
@@ -255,6 +256,13 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
         session.add_all(new_pages)
         await session.commit()
 
+        # Rebuild the FTS5 index for this repo so text search stays current.
+        try:
+            await session.execute(text("INSERT INTO wiki_pages_fts(wiki_pages_fts) VALUES('rebuild')"))
+            await session.commit()
+        except Exception:  # noqa: BLE001 — FTS rebuild is a non-critical optimisation
+            logger.warning("FTS rebuild skipped for repo %s (table may not exist yet)", repo.id)
+
         # --- 9. Lectura de archivos de código en paralelo (reutilizada por Qdrant y el grafo) ---
         await _update_job(session, job, progress=82, step="Leyendo archivos de código del repositorio...")
         code_file_contents = await _read_code_files(client, project.id, target_branch, structure)
@@ -292,15 +300,19 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 logger.info("No code files changed since last embed for repo %s; skipping re-embedding.", repo.id)
                 repo.indexed_in_qdrant = True
             else:
-                # Reset when files were deleted (chunks can't be removed by path) or on first indexing.
-                # Otherwise just upsert the changed files — unchanged file vectors remain valid.
-                full_reset = bool(deleted_paths) or not repo.indexed_in_qdrant
+                # Full reset only on first indexing; on subsequent runs deleted files are
+                # removed point-by-point via delete_by_file_paths so unchanged vectors survive.
+                full_reset = not repo.indexed_in_qdrant
                 files_to_embed = code_file_contents if full_reset else changed_files
                 logger.info(
                     "Embedding %d/%d files for repo %s (full_reset=%s, deleted=%d)",
                     len(files_to_embed), len(code_file_contents), repo.id, full_reset, len(deleted_paths),
                 )
-                await _embed_repository_code(files_to_embed, repo.id, full_reset=full_reset)
+                await _embed_repository_code(
+                    files_to_embed, repo.id,
+                    full_reset=full_reset,
+                    deleted_paths=deleted_paths if not full_reset else None,
+                )
                 repo.indexed_in_qdrant = True
 
             repo.file_hashes = new_hashes
@@ -310,7 +322,13 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
             repo.indexed_in_qdrant = False
         await session.commit()
 
-        await _update_job(session, job, status=JobStatus.DONE.value, progress=100, step="Indexado completo.")
+        done_step = "Indexado completo."
+        if _truncated:
+            done_step += (
+                f" ⚠ Se alcanzó el límite de {settings.max_files_to_index} archivos; "
+                "el repo puede tener más. Aumenta MAX_FILES_TO_INDEX para indexado completo."
+            )
+        await _update_job(session, job, status=JobStatus.DONE.value, progress=100, step=done_step)
 
 
 async def _read_code_files(client: GitLabClient, project_id: str, branch: str, structure) -> dict[str, str]:
@@ -365,16 +383,17 @@ def _reuse_if_unchanged(
 
 
 async def _embed_repository_code(
-    file_contents: dict[str, str], repository_id: int, *, full_reset: bool = True
+    file_contents: dict[str, str], repository_id: int, *, full_reset: bool = True,
+    deleted_paths: set[str] | None = None,
 ) -> None:
     """
     Chunks, embeds, and upserts code into the Qdrant collection for this repo.
-    When full_reset=True the collection is dropped and recreated first (needed when
-    files were deleted or on first indexing). When False, only the provided files are
-    upserted — existing vectors for unchanged files remain valid.
+    When full_reset=True the collection is dropped and recreated (first indexing).
+    When False, deleted_paths points are removed individually and only the provided
+    files are upserted — existing vectors for unchanged files remain valid.
     """
     chunks = chunk_files(file_contents)
-    if not chunks:
+    if not chunks and not deleted_paths:
         logger.warning("No se encontraron chunks de código para embeber en repo %s", repository_id)
         return
 
@@ -383,6 +402,10 @@ async def _embed_repository_code(
     try:
         if full_reset:
             await vector_store.reset_collection()
+        elif deleted_paths:
+            await vector_store.delete_by_file_paths(deleted_paths)
+        if not chunks:
+            return
         for i in range(0, len(chunks), settings.embedding_batch_size):
             batch = chunks[i:i + settings.embedding_batch_size]
             texts = [c.content for c in batch]

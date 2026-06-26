@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass
 
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, MatchAny, PointStruct, VectorParams
 
 from app.core.config import settings
 from app.services.code_chunker import CodeChunk
@@ -109,6 +109,25 @@ class VectorStore:
             )
             for point in results.points
         ]
+
+    async def delete_by_file_paths(self, file_paths: set[str]) -> None:
+        """Delete all Qdrant points whose file_path payload matches any of the given paths.
+
+        Used for incremental re-indexing: instead of dropping and recreating the entire
+        collection when a file is deleted, only the affected points are removed.
+        """
+        if not file_paths:
+            return
+        try:
+            await self._client.delete(
+                collection_name=self.collection_name,
+                points_selector=Filter(
+                    must=[FieldCondition(key="file_path", match=MatchAny(any=list(file_paths)))]
+                ),
+            )
+            logger.info("Deleted Qdrant points for %d paths in '%s'", len(file_paths), self.collection_name)
+        except Exception:
+            logger.warning("Failed to delete points for paths in '%s'", self.collection_name, exc_info=True)
 
     async def close(self) -> None:
         await self._client.close()

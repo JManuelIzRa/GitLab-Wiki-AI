@@ -1,15 +1,38 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Pencil, Check, X, History, RotateCcw, Upload } from "lucide-react";
+import { Check, History, Pencil, RotateCcw, Upload, X, ZoomIn } from "lucide-react";
 import mermaid from "../utils/mermaid";
 import { api } from "../api/client";
+
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+
+function Toast({ message, onHide }) {
+  useEffect(() => {
+    const t = setTimeout(onHide, 2400);
+    return () => clearTimeout(t);
+  }, [onHide]);
+
+  return (
+    <div style={styles.toast}>
+      <Check size={13} />
+      {message}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mermaid
+// ---------------------------------------------------------------------------
 
 function MermaidDiagram({ code }) {
   const containerRef = useRef(null);
   const [error, setError] = useState(null);
+  const [zoomed, setZoomed] = useState(false);
   const rawId = useId();
   const diagramId = `mermaid-${rawId.replace(/:/g, "")}`;
 
@@ -25,9 +48,7 @@ function MermaidDiagram({ code }) {
       .catch((err) => {
         if (!cancelled) setError(err.message);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [code]);
 
   if (error) {
@@ -38,8 +59,73 @@ function MermaidDiagram({ code }) {
     );
   }
 
-  return <div ref={containerRef} style={styles.mermaidContainer} />;
+  return (
+    <>
+      <div
+        ref={containerRef}
+        style={{ ...styles.mermaidContainer, cursor: "zoom-in" }}
+        title="Clic para ampliar"
+        onClick={() => setZoomed(true)}
+      />
+      {zoomed && (
+        <div style={styles.zoomOverlay} onClick={() => setZoomed(false)}>
+          <div style={styles.zoomPanel} onClick={(e) => e.stopPropagation()}>
+            <button style={styles.zoomClose} onClick={() => setZoomed(false)}>
+              <X size={14} />
+            </button>
+            <div
+              style={styles.zoomContent}
+              dangerouslySetInnerHTML={{ __html: containerRef.current?.innerHTML || "" }}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
+
+// ---------------------------------------------------------------------------
+// Code block with copy button
+// ---------------------------------------------------------------------------
+
+function CodeBlock({ lang, children }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(children).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }, [children]);
+
+  return (
+    <div style={styles.codeWrapper}>
+      <button
+        style={{ ...styles.copyBtn, color: copied ? "var(--accent-sage)" : "var(--text-tertiary)" }}
+        onClick={handleCopy}
+        title="Copiar código"
+      >
+        {copied ? <Check size={11} /> : "⎘"}
+      </button>
+      <SyntaxHighlighter
+        language={lang}
+        style={vscDarkPlus}
+        customStyle={{
+          borderRadius: 8,
+          fontSize: 12.5,
+          border: "1px solid var(--border-subtle)",
+          margin: "16px 0",
+        }}
+      >
+        {children.replace(/\n$/, "")}
+      </SyntaxHighlighter>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Revision panel
+// ---------------------------------------------------------------------------
 
 function RevisionPanel({ repoId, slug, onRestore, onClose }) {
   const [revisions, setRevisions] = useState([]);
@@ -109,9 +195,13 @@ function RevisionPanel({ repoId, slug, onRestore, onClose }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Push to GitLab dialog
+// ---------------------------------------------------------------------------
+
 function PushToGitLabDialog({ repoId, onClose }) {
   const [token, setToken] = useState("");
-  const [status, setStatus] = useState(null); // null | { ok, pages_pushed, errors }
+  const [status, setStatus] = useState(null);
   const [pushing, setPushing] = useState(false);
   const [error, setError] = useState("");
 
@@ -152,7 +242,6 @@ function PushToGitLabDialog({ repoId, onClose }) {
           <>
             <p style={styles.revisionInfo}>
               Introduce un Personal Access Token de GitLab con scope <code>api</code> o <code>write_wiki</code>.
-              Se crearán o actualizarán todas las páginas del wiki generado en el wiki nativo de este repositorio.
             </p>
             <input
               type="password"
@@ -179,6 +268,10 @@ function PushToGitLabDialog({ repoId, onClose }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
@@ -186,12 +279,16 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
   const [saveError, setSaveError] = useState("");
   const [showRevisions, setShowRevisions] = useState(false);
   const [showPushDialog, setShowPushDialog] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const hideToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
     setIsEditing(false);
     setEditedContent("");
     setSaveError("");
     setShowRevisions(false);
+    setToast(null);
   }, [page?.slug]);
 
   if (!page) return null;
@@ -208,6 +305,7 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
     try {
       await onUpdatePage(page.slug, editedContent);
       setIsEditing(false);
+      setToast("Guardado correctamente");
     } catch (err) {
       setSaveError(err.message || "No se pudo guardar la página.");
     } finally {
@@ -222,12 +320,14 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
   };
 
   const handleRestored = (restoredPage) => {
-    // Bubble up to App so the active page state is updated
     onUpdatePage?.(restoredPage.slug, restoredPage.content_markdown, restoredPage);
+    setToast("Revisión restaurada");
   };
 
   return (
     <article style={styles.article}>
+      {toast && <Toast message={toast} onHide={hideToast} />}
+
       <div style={styles.pageHeader}>
         <h1 style={styles.h1}>{page.title}</h1>
         <div style={styles.pageActions}>
@@ -241,7 +341,7 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
                 <History size={14} />
                 Historial
               </button>
-              <button onClick={handleEditStart} style={styles.editButton} title="Editar página">
+              <button onClick={handleEditStart} style={styles.editButton} title="Editar página (E)">
                 <Pencil size={14} />
                 Editar
               </button>
@@ -278,26 +378,14 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
             code({ className, children, ...props }) {
               const match = /language-(\w+)/.exec(className || "");
               const lang = match?.[1];
+              const codeStr = String(children).replace(/\n$/, "");
 
               if (lang === "mermaid") {
-                return <MermaidDiagram code={String(children).trim()} />;
+                return <MermaidDiagram code={codeStr} />;
               }
 
               if (lang) {
-                return (
-                  <SyntaxHighlighter
-                    language={lang}
-                    style={vscDarkPlus}
-                    customStyle={{
-                      borderRadius: 8,
-                      fontSize: 12.5,
-                      border: "1px solid var(--border-subtle)",
-                      margin: "16px 0",
-                    }}
-                  >
-                    {String(children).replace(/\n$/, "")}
-                  </SyntaxHighlighter>
-                );
+                return <CodeBlock lang={lang}>{codeStr}</CodeBlock>;
               }
 
               return (
@@ -328,9 +416,7 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
           <div style={styles.sourcesLabel}>archivos fuente</div>
           <div style={styles.sourcesList}>
             {page.source_files.map((f) => (
-              <span key={f} style={styles.sourceTag}>
-                {f}
-              </span>
+              <span key={f} style={styles.sourceTag}>{f}</span>
             ))}
           </div>
         </div>
@@ -346,20 +432,39 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
       )}
 
       {showPushDialog && repositoryId && (
-        <PushToGitLabDialog
-          repoId={repositoryId}
-          onClose={() => setShowPushDialog(false)}
-        />
+        <PushToGitLabDialog repoId={repositoryId} onClose={() => setShowPushDialog(false)} />
       )}
     </article>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 
 const styles = {
   article: {
     maxWidth: 720,
     margin: "0 auto",
     padding: "56px 32px 120px",
+    position: "relative",
+  },
+  toast: {
+    position: "fixed",
+    bottom: 28,
+    right: 28,
+    background: "var(--accent-sage-dim)",
+    color: "#EDE8DC",
+    borderRadius: 8,
+    padding: "10px 18px",
+    fontSize: 13,
+    fontFamily: "var(--font-mono)",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    zIndex: 300,
+    boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+    animation: "fadeIn 0.15s ease",
   },
   pageHeader: {
     display: "flex",
@@ -549,6 +654,23 @@ const styles = {
     color: "var(--text-secondary)",
     fontFamily: "var(--font-serif)",
   },
+  codeWrapper: {
+    position: "relative",
+  },
+  copyBtn: {
+    position: "absolute",
+    top: 26,
+    right: 8,
+    zIndex: 2,
+    background: "rgba(32,29,23,0.7)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "3px 7px",
+    fontSize: 12,
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
+    lineHeight: 1,
+  },
   mermaidContainer: {
     display: "flex",
     justifyContent: "center",
@@ -566,6 +688,41 @@ const styles = {
     padding: 12,
     borderRadius: 6,
     margin: "16px 0",
+  },
+  zoomOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.75)",
+    zIndex: 400,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomPanel: {
+    position: "relative",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 12,
+    padding: "40px 32px 32px",
+    maxWidth: "90vw",
+    maxHeight: "90vh",
+    overflow: "auto",
+    minWidth: 360,
+  },
+  zoomContent: {
+    display: "flex",
+    justifyContent: "center",
+  },
+  zoomClose: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "4px 8px",
+    cursor: "pointer",
+    color: "var(--text-secondary)",
   },
   sourcesBox: {
     marginTop: 48,
@@ -592,7 +749,6 @@ const styles = {
     padding: "3px 8px",
     color: "var(--text-tertiary)",
   },
-  // Revision panel
   revisionOverlay: {
     position: "fixed",
     inset: 0,

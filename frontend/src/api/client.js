@@ -134,6 +134,19 @@ export const api = {
 
   getExportUrl: (repoId) => `${API_BASE}/api/repositories/${repoId}/export`,
 
+  getHtmlExportUrl: (repoId) => `${API_BASE}/api/repositories/${repoId}/export/html`,
+
+  searchWikiText: (repoId, q) =>
+    request(`/api/repositories/${repoId}/wiki/search?q=${encodeURIComponent(q)}`),
+
+  setWebhookSecret: (repoId, webhookSecret) =>
+    request(`/api/repositories/${repoId}/webhook-secret`, {
+      method: "PATCH",
+      body: JSON.stringify({ webhook_secret: webhookSecret }),
+    }),
+
+  getServerConfig: () => request("/api/config"),
+
   getDependencyGraph: (repoId) => request(`/api/repositories/${repoId}/dependency-graph`),
 
   deleteRepository: (repoId) => request(`/api/repositories/${repoId}`, { method: "DELETE" }),

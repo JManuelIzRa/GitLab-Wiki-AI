@@ -43,9 +43,9 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import openai
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,9 +61,9 @@ from app.models.schemas import (
     CrossRepoSearchRequest, CrossRepoSearchResponse, CrossRepoSearchResult,
     DependencyGraphResponse, GitLabWebhookPayload, GroupDetail, GroupJobResponse,
     GroupRepoStatusResponse, GroupSummary, IndexGroupRequest, IndexJobResponse, IndexRepositoryRequest,
-    PushToGitLabWikiRequest, PushToGitLabWikiResponse,
+    PushToGitLabWikiRequest, PushToGitLabWikiResponse, RepoWebhookSecretUpdate,
     RepositorySummary, WikiPageDetail, WikiPageSummary, WikiPageUpdate,
-    WikiRevisionResponse, WikiStructureResponse,
+    WikiRevisionResponse, WikiStructureResponse, WikiTextSearchResult,
 )
 from app.services.embedding_client import EmbeddingError, get_embedding_client
 from app.services.gitlab_client import GitLabAuthError, GitLabClient, GitLabNotFoundError
@@ -140,14 +140,17 @@ async def _db_cache_set(session: AsyncSession, repo_id: int, question: str, answ
     )
     await session.execute(stmt)
 
-    # Evict oldest entries when the per-repo count exceeds the cap.
-    count_result = await session.execute(
-        select(WikiCache.id).where(WikiCache.repository_id == repo_id).order_by(WikiCache.created_at.desc())
+    # Evict oldest entries in a single query when the per-repo count exceeds the cap.
+    await session.execute(
+        delete(WikiCache).where(
+            WikiCache.id.in_(
+                select(WikiCache.id)
+                .where(WikiCache.repository_id == repo_id)
+                .order_by(WikiCache.created_at.desc())
+                .offset(_CHAT_CACHE_MAX)
+            )
+        )
     )
-    all_ids = [row[0] for row in count_result.all()]
-    if len(all_ids) > _CHAT_CACHE_MAX:
-        stale_ids = all_ids[_CHAT_CACHE_MAX:]
-        await session.execute(delete(WikiCache).where(WikiCache.id.in_(stale_ids)))
 
     await session.commit()
 
@@ -292,8 +295,16 @@ async def stream_job_status(job_id: int):
 # ---------------------------------------------------------------------------
 
 @router.get("/repositories", response_model=list[RepositorySummary])
-async def list_repositories(session: AsyncSession = Depends(get_session)):
-    repos = (await session.execute(select(Repository).order_by(Repository.updated_at.desc()))).scalars().all()
+async def list_repositories(
+    session: AsyncSession = Depends(get_session),
+    offset: int = Query(0, ge=0, description="Número de registros a saltar"),
+    limit: int = Query(100, ge=1, le=500, description="Máximo de registros a devolver"),
+):
+    repos = (
+        await session.execute(
+            select(Repository).order_by(Repository.updated_at.desc()).offset(offset).limit(limit)
+        )
+    ).scalars().all()
     return repos
 
 
@@ -470,6 +481,110 @@ async def export_wiki(repo_id: int, session: AsyncSession = Depends(get_session)
         media_type="text/markdown",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/repositories/{repo_id}/export/html")
+async def export_wiki_html(repo_id: int, session: AsyncSession = Depends(get_session)):
+    """Descarga el wiki completo como un único archivo HTML autocontenido con estilos integrados."""
+    from app.services.wiki_exporter import export_wiki_to_html
+
+    repo = await session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+
+    pages = (
+        await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order))
+    ).scalars().all()
+    if not pages:
+        raise HTTPException(status_code=400, detail="Este repositorio aún no tiene wiki generado")
+
+    html_content = export_wiki_to_html(repo, pages)
+    filename = f"{repo.project_path.replace('/', '-')}-wiki.html"
+
+    return Response(
+        content=html_content,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/repositories/{repo_id}/wiki/search", response_model=list[WikiTextSearchResult])
+async def search_wiki_text(
+    repo_id: int,
+    q: str = Query(..., min_length=1, max_length=200, description="Texto a buscar en el wiki"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Full-text search across all wiki pages for this repository.
+
+    Uses SQLite FTS5 when available, with a LIKE fallback for safety.
+    Returns up to 20 results with a short excerpt highlighting the match position.
+    """
+    repo = await session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+
+    try:
+        rows = (await session.execute(
+            text(
+                "SELECT p.slug, p.title, p.content_markdown "
+                "FROM wiki_pages_fts fts "
+                "JOIN wiki_pages p ON p.id = fts.rowid "
+                "WHERE p.repository_id = :repo_id AND wiki_pages_fts MATCH :q "
+                "ORDER BY rank LIMIT 20"
+            ),
+            {"repo_id": repo_id, "q": q},
+        )).all()
+    except Exception:
+        # FTS table not yet populated or query error — fall back to LIKE
+        like_term = f"%{q}%"
+        rows = (await session.execute(
+            select(WikiPage.slug, WikiPage.title, WikiPage.content_markdown)
+            .where(
+                WikiPage.repository_id == repo_id,
+                or_(WikiPage.title.ilike(like_term), WikiPage.content_markdown.ilike(like_term)),
+            )
+            .order_by(WikiPage.order)
+            .limit(20)
+        )).all()
+
+    return [
+        WikiTextSearchResult(slug=row.slug, title=row.title, excerpt=_extract_excerpt(row.content_markdown, q))
+        for row in rows
+    ]
+
+
+def _extract_excerpt(content: str, query: str, context: int = 120) -> str:
+    """Return a short excerpt around the first match of *query* in *content*."""
+    idx = content.lower().find(query.lower())
+    if idx == -1:
+        return content[:200] + ("…" if len(content) > 200 else "")
+    start = max(0, idx - 80)
+    end = min(len(content), idx + len(query) + context)
+    excerpt = content[start:end]
+    if start > 0:
+        excerpt = "…" + excerpt
+    if end < len(content):
+        excerpt = excerpt + "…"
+    return excerpt
+
+
+@router.patch("/repositories/{repo_id}/webhook-secret")
+async def set_repo_webhook_secret(
+    repo_id: int,
+    payload: RepoWebhookSecretUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Set (or clear) the per-repo webhook secret used to validate GitLab push events.
+
+    When set, overrides the global GITLAB_WEBHOOK_SECRET for this specific repo,
+    allowing each repo to have its own GitLab webhook configured with a unique secret.
+    """
+    repo = await session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+    repo.webhook_secret = payload.webhook_secret
+    await session.commit()
+    return {"ok": True, "webhook_secret_set": bool(payload.webhook_secret)}
 
 
 # ---------------------------------------------------------------------------
@@ -735,10 +850,26 @@ async def gitlab_webhook(
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ):
-    """Receives GitLab push webhooks and triggers a re-index of the affected repository."""
-    if settings.gitlab_webhook_secret:
+    """Receives GitLab push webhooks and triggers a re-index of the affected repository.
+
+    Token validation order: per-repo webhook_secret → global GITLAB_WEBHOOK_SECRET.
+    If neither is set, the endpoint accepts unauthenticated requests (dev only).
+    """
+    project_path_early = payload.project.get("path_with_namespace", "")
+    repo_early = None
+    if project_path_early:
+        repo_early = (
+            await session.execute(
+                select(Repository).where(Repository.project_path == project_path_early).limit(1)
+            )
+        ).scalars().first()
+
+    # Per-repo secret takes precedence over the global one.
+    effective_secret = (repo_early.webhook_secret if repo_early and repo_early.webhook_secret
+                        else settings.gitlab_webhook_secret)
+    if effective_secret:
         token = request.headers.get("x-gitlab-token", "")
-        if not hmac.compare_digest(token, settings.gitlab_webhook_secret):
+        if not hmac.compare_digest(token, effective_secret):
             raise HTTPException(status_code=403, detail="Invalid webhook token")
 
     if payload.object_kind != "push":
@@ -748,7 +879,7 @@ async def gitlab_webhook(
     if not project_path:
         raise HTTPException(status_code=422, detail="Missing project.path_with_namespace in payload")
 
-    repo = (
+    repo = repo_early or (
         await session.execute(
             select(Repository).where(Repository.project_path == project_path).limit(1)
         )
@@ -806,6 +937,22 @@ async def delete_repository(repo_id: int, session: AsyncSession = Depends(get_se
         finally:
             await vector_store.close()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Server configuration (read-only)
+# ---------------------------------------------------------------------------
+
+@router.get("/config")
+async def get_server_config():
+    """Returns non-sensitive server configuration so the UI can display active settings."""
+    return {
+        "llm_model": settings.openai_chat_model,
+        "wiki_language": settings.wiki_language,
+        "max_files_to_index": settings.max_files_to_index,
+        "rag_top_k": settings.rag_top_k,
+        "embedding_dimensions": settings.embedding_dimensions,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -927,9 +1074,15 @@ async def index_group(
 
 
 @router.get("/groups", response_model=list[GroupSummary])
-async def list_groups(session: AsyncSession = Depends(get_session)):
+async def list_groups(
+    session: AsyncSession = Depends(get_session),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
     groups = (
-        await session.execute(select(GitLabGroup).order_by(GitLabGroup.updated_at.desc()))
+        await session.execute(
+            select(GitLabGroup).order_by(GitLabGroup.updated_at.desc()).offset(offset).limit(limit)
+        )
     ).scalars().all()
     return groups
 
