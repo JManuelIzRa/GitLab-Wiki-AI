@@ -68,6 +68,14 @@ async def _warn_unreachable_services() -> None:
 async def lifespan(app: FastAPI):
     await init_db()
     await _warn_unreachable_services()
+
+    if not settings.gitlab_webhook_secret:
+        logger.warning(
+            "GITLAB_WEBHOOK_SECRET is not set — the webhook endpoint /api/webhooks/gitlab "
+            "accepts unauthenticated requests. Set this variable in production to prevent "
+            "unauthorized re-indexing triggered by anyone who knows the URL."
+        )
+
     # Clean up Qdrant collections for repos that were deleted from the database.
     async with AsyncSessionLocal() as session:
         known_ids = set((await session.execute(select(Repository.id))).scalars().all())

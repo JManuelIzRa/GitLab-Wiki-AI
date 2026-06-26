@@ -170,3 +170,32 @@ class GitLabClient:
             return raw.decode("utf-8")
         except (UnicodeDecodeError, ValueError):
             return None  # binario o encoding no soportado
+
+    async def create_or_update_wiki_page(
+        self, project_id: str, slug: str, title: str, content: str
+    ) -> dict:
+        """Creates or updates a page in the project's native GitLab wiki.
+
+        Tries PUT (update) first; falls back to POST (create) when the page does not exist.
+        Requires the PAT to have api or write_wiki scope.
+        """
+        encoded_slug = quote(slug, safe="")
+        wiki_url = f"{self.api_url}/projects/{project_id}/wikis/{encoded_slug}"
+        body = {"title": title, "content": content, "format": "markdown"}
+
+        try:
+            resp = await self._http.put(wiki_url, json=body)
+            if resp.status_code == 404:
+                # Page doesn't exist yet — create it
+                create_url = f"{self.api_url}/projects/{project_id}/wikis"
+                resp = await self._http.post(create_url, json=body)
+            if resp.status_code == 401:
+                raise GitLabAuthError(
+                    "Token inválido o sin permisos suficientes para escribir en el wiki (scope: api o write_wiki)."
+                )
+            resp.raise_for_status()
+            return resp.json()
+        except GitLabAuthError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Failed to push wiki page '{slug}': {exc}") from exc

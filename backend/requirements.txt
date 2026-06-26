@@ -18,3 +18,5 @@ tree-sitter-typescript>=0.21.0
 tree-sitter-language-pack>=0.0.1
 slowapi>=0.1.9
 python-json-logger>=2.0.7
+# SQLite dialect for ON CONFLICT DO UPDATE (upsert) support
+# (included in SQLAlchemy 2.x — no extra package needed)

@@ -137,6 +137,23 @@ export const api = {
   getDependencyGraph: (repoId) => request(`/api/repositories/${repoId}/dependency-graph`),
 
   deleteRepository: (repoId) => request(`/api/repositories/${repoId}`, { method: "DELETE" }),
+
+  /** Returns the revision history for a wiki page (newest first). */
+  getWikiRevisions: (repoId, slug) =>
+    request(`/api/repositories/${repoId}/wiki/${slug}/revisions`),
+
+  /** Restores a wiki page to a specific revision. */
+  restoreWikiRevision: (repoId, slug, revisionId) =>
+    request(`/api/repositories/${repoId}/wiki/${slug}/revisions/${revisionId}/restore`, {
+      method: "POST",
+    }),
+
+  /** Pushes all generated wiki pages to the repository's native GitLab wiki. */
+  pushToGitLabWiki: (repoId, privateToken) =>
+    request(`/api/repositories/${repoId}/push-to-gitlab-wiki`, {
+      method: "POST",
+      body: JSON.stringify({ private_token: privateToken }),
+    }),
 };
 
 export { ApiError };

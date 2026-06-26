@@ -46,6 +46,11 @@ class CodeSearchRequest(BaseModel):
     top_k: int | None = Field(default=None, ge=1, le=50, description="Número de resultados a devolver; usa el default del backend si se omite")
 
 
+class PushToGitLabWikiRequest(BaseModel):
+    """Credentials needed to push the generated wiki to GitLab's built-in wiki."""
+    private_token: str = Field(..., min_length=1, max_length=512, description="PAT with api or write_wiki scope")
+
+
 # ---------- Responses ----------
 
 class IndexJobResponse(BaseModel):
@@ -70,6 +75,8 @@ class RepositorySummary(BaseModel):
     default_branch: str
     last_commit_sha: str
     indexed_in_qdrant: bool
+    is_monorepo: bool = False
+    workspace_roots: list[str] | None = None
     updated_at: datetime
 
 
@@ -88,6 +95,17 @@ class WikiPageDetail(WikiPageSummary):
 
     content_markdown: str
     source_files: list[str]
+    is_ai_generated: bool = False
+
+
+class WikiRevisionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    wiki_page_id: int
+    is_ai_generated: bool
+    created_at: datetime
+    content_preview: str = ""
 
 
 class WikiStructureResponse(BaseModel):
@@ -135,3 +153,9 @@ class GitLabWebhookPayload(BaseModel):
     ref: str = ""
     checkout_sha: str = ""
     project: dict = Field(default_factory=dict)
+
+
+class PushToGitLabWikiResponse(BaseModel):
+    ok: bool
+    pages_pushed: int
+    errors: list[str] = []
