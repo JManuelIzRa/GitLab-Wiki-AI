@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.models.db_models import (
     GitLabGroup,
@@ -37,8 +38,6 @@ from app.services.indexer import run_index_job
 from app.services.wiki_generator import WikiGenerator
 
 logger = logging.getLogger(__name__)
-
-_GROUP_CONCURRENCY = 3  # repos indexed in parallel per group job
 
 
 async def _update_group_job(
@@ -275,10 +274,10 @@ async def run_group_index_job(
         await _update_group_job(
             session, job,
             status=GroupIndexStatus.INDEXING.value,
-            step=f"Indexando {len(paired)} repositorios (concurrencia={_GROUP_CONCURRENCY})...",
+            step=f"Indexando {len(paired)} repositorios (concurrencia={settings.group_concurrency})...",
         )
 
-    semaphore = asyncio.Semaphore(_GROUP_CONCURRENCY)
+    semaphore = asyncio.Semaphore(settings.group_concurrency)
     tasks = [
         _index_single_repo(
             semaphore,

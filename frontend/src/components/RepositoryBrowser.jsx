@@ -6,6 +6,7 @@ import { GroupBrowser } from "./GroupBrowser";
  */
 export function RepositoryBrowser({
   repositories, loading, errorMessage, onOpenRepository, onNewRepository, onDeleteRepository, onReindexRepository,
+  hasMoreRepos, onLoadMoreRepos, loadingMoreRepos,
   groups, groupsLoading, groupsError, onOpenGroup, onNewGroup, onDeleteGroup, onReindexGroup,
 }) {
   const [tab, setTab] = useState("repos");
@@ -77,42 +78,53 @@ export function RepositoryBrowser({
             )}
 
             {!loading && repositories.length > 0 && (
-              <ul style={styles.list}>
-                {repositories.map((repo) => (
-                  <li key={repo.id} style={styles.listItem} onClick={() => onOpenRepository(repo)}>
-                    <div style={styles.itemMain}>
-                      <div style={styles.itemName}>{repo.name}</div>
-                      <div style={styles.itemPath}>{repo.project_path}</div>
-                    </div>
-                    <div style={styles.itemMeta}>
-                      <span style={styles.branchTag}>{repo.default_branch}</span>
-                      <span
-                        style={{
-                          ...styles.ragTag,
-                          color: repo.indexed_in_qdrant ? "var(--accent-sage)" : "var(--text-tertiary)",
-                        }}
-                      >
-                        ● {repo.indexed_in_qdrant ? "RAG activo" : "solo wiki"}
-                      </span>
-                      <button
-                        onClick={(e) => handleReindex(e, repo)}
-                        style={styles.reindexBtn}
-                        title="Comprobar si hay cambios y reindexar si es necesario"
-                      >
-                        reindexar
-                      </button>
-                      <button
-                        onClick={(e) => handleDelete(e, repo.id)}
-                        style={styles.deleteBtn}
-                        disabled={deletingId === repo.id}
-                        title="Eliminar este repositorio indexado"
-                      >
-                        {deletingId === repo.id ? "…" : "eliminar"}
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul style={styles.list}>
+                  {repositories.map((repo) => (
+                    <li key={repo.id} style={styles.listItem} onClick={() => onOpenRepository(repo)}>
+                      <div style={styles.itemMain}>
+                        <div style={styles.itemName}>{repo.name}</div>
+                        <div style={styles.itemPath}>{repo.project_path}</div>
+                      </div>
+                      <div style={styles.itemMeta}>
+                        <span style={styles.branchTag}>{repo.default_branch}</span>
+                        <span
+                          style={{
+                            ...styles.ragTag,
+                            color: repo.indexed_in_qdrant ? "var(--accent-sage)" : "var(--text-tertiary)",
+                          }}
+                        >
+                          ● {repo.indexed_in_qdrant ? "RAG activo" : "solo wiki"}
+                        </span>
+                        <button
+                          onClick={(e) => handleReindex(e, repo)}
+                          style={styles.reindexBtn}
+                          title="Comprobar si hay cambios y reindexar si es necesario"
+                        >
+                          reindexar
+                        </button>
+                        <button
+                          onClick={(e) => handleDelete(e, repo.id)}
+                          style={styles.deleteBtn}
+                          disabled={deletingId === repo.id}
+                          title="Eliminar este repositorio indexado"
+                        >
+                          {deletingId === repo.id ? "…" : "eliminar"}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {hasMoreRepos && (
+                  <button
+                    onClick={onLoadMoreRepos}
+                    disabled={loadingMoreRepos}
+                    style={styles.loadMoreBtn}
+                  >
+                    {loadingMoreRepos ? "Cargando…" : "Ver más repositorios"}
+                  </button>
+                )}
+              </>
             )}
           </>
         )}
@@ -325,5 +337,17 @@ const styles = {
     fontSize: 12.5,
     color: "#E5A99A",
     lineHeight: 1.5,
+  },
+  loadMoreBtn: {
+    marginTop: 12,
+    width: "100%",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 6,
+    padding: "9px 14px",
+    fontSize: 12,
+    color: "var(--text-secondary)",
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
   },
 };

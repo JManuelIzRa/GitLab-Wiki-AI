@@ -56,7 +56,8 @@ export const api = {
 
   getJobStatus: (jobId) => request(`/api/jobs/${jobId}`),
 
-  listRepositories: () => request("/api/repositories"),
+  listRepositories: (offset = 0, limit = 100) =>
+    request(`/api/repositories?offset=${offset}&limit=${limit}`),
 
   getWikiStructure: (repoId) => request(`/api/repositories/${repoId}/wiki`),
 

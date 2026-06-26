@@ -1,7 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { RepositoryBrowser } from "./components/RepositoryBrowser";
+import { ConnectForm } from "./components/ConnectForm";
+import { GroupConnectForm } from "./components/GroupConnectForm";
+import { GroupIndexingProgress } from "./components/GroupIndexingProgress";
+import { GroupWikiView } from "./components/GroupWikiView";
+import { IndexingProgress } from "./components/IndexingProgress";
+import { WikiSidebar } from "./components/WikiSidebar";
+import { WikiPageContent } from "./components/WikiPageContent";
+import { AskPanel } from "./components/AskPanel";
+import { CodeSearch } from "./components/CodeSearch";
+import { DependencyGraphView } from "./components/DependencyGraphView";
+import { useJobPolling } from "./hooks/useJobPolling";
+import { api } from "./api/client";
+import { offlineCache } from "./utils/offlineCache";
+
 // ---------------------------------------------------------------------------
-// Page loading skeleton
+// Page loading skeleton (shown while the first wiki page loads)
 // ---------------------------------------------------------------------------
 
 function PageSkeleton() {
@@ -52,20 +67,66 @@ const skeletonStyles = {
     borderRadius: 1,
   },
 };
-import { RepositoryBrowser } from "./components/RepositoryBrowser";
-import { ConnectForm } from "./components/ConnectForm";
-import { GroupConnectForm } from "./components/GroupConnectForm";
-import { GroupIndexingProgress } from "./components/GroupIndexingProgress";
-import { GroupWikiView } from "./components/GroupWikiView";
-import { IndexingProgress } from "./components/IndexingProgress";
-import { WikiSidebar } from "./components/WikiSidebar";
-import { WikiPageContent } from "./components/WikiPageContent";
-import { AskPanel } from "./components/AskPanel";
-import { CodeSearch } from "./components/CodeSearch";
-import { DependencyGraphView } from "./components/DependencyGraphView";
-import { useJobPolling } from "./hooks/useJobPolling";
-import { api } from "./api/client";
-import { offlineCache } from "./utils/offlineCache";
+
+// ---------------------------------------------------------------------------
+// Wiki layout — extracted so App stays lean
+// ---------------------------------------------------------------------------
+
+function WikiLayout({
+  repository, pages, activeSlug, activePage, pageLoading,
+  onSelectPage, onReset, onReindex, onUpdatePage,
+  searchOpen, graphOpen, setSearchOpen, setGraphOpen,
+  theme, onToggleTheme,
+}) {
+  return (
+    <div style={{ display: "flex" }}>
+      <WikiSidebar
+        repository={repository}
+        pages={pages}
+        activeSlug={activeSlug}
+        onSelectPage={onSelectPage}
+        onReset={onReset}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenGraph={() => setGraphOpen(true)}
+        onReindex={onReindex}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+      />
+      <main style={{ flex: 1, height: "100vh", overflowY: "auto", position: "relative" }}>
+        {pageLoading && !activePage && <PageSkeleton />}
+        {pageLoading && activePage && (
+          <div style={skeletonStyles.loadingBar}>
+            <div style={skeletonStyles.loadingBarInner} />
+          </div>
+        )}
+        {activePage && (
+          <WikiPageContent
+            page={activePage}
+            repositoryId={repository?.id}
+            onUpdatePage={onUpdatePage}
+          />
+        )}
+      </main>
+      {repository && (
+        <AskPanel repositoryId={repository.id} ragAvailable={repository.indexed_in_qdrant} />
+      )}
+      {searchOpen && repository && (
+        <CodeSearch
+          repositoryId={repository.id}
+          ragAvailable={repository.indexed_in_qdrant}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+      {graphOpen && repository && (
+        <DependencyGraphView repositoryId={repository.id} onClose={() => setGraphOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// View constants
+// ---------------------------------------------------------------------------
 
 const VIEW = {
   BROWSE: "browse",
@@ -76,6 +137,12 @@ const VIEW = {
   GROUP_INDEXING: "group_indexing",
   GROUP_WIKI: "group_wiki",
 };
+
+const REPOS_PAGE_SIZE = 20;
+
+// ---------------------------------------------------------------------------
+// App root — manages shared state and orchestrates view transitions
+// ---------------------------------------------------------------------------
 
 function App() {
   // ---- Theme ----
@@ -93,10 +160,14 @@ function App() {
     localStorage.getItem("activeJobId") ? VIEW.INDEXING : VIEW.BROWSE
   );
 
+  // ---- Repository list + pagination ----
   const [repositories, setRepositories] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(true);
   const [browseError, setBrowseError] = useState("");
+  const [hasMoreRepos, setHasMoreRepos] = useState(false);
+  const [repoLoadingMore, setRepoLoadingMore] = useState(false);
 
+  // ---- Indexing job ----
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeJobId, setActiveJobId] = useState(() => {
@@ -108,6 +179,7 @@ function App() {
   );
   const [reindexPrefill, setReindexPrefill] = useState(null);
 
+  // ---- Wiki state ----
   const [repository, setRepository] = useState(null);
   const [pages, setPages] = useState([]);
   const [activeSlug, setActiveSlug] = useState(null);
@@ -116,7 +188,7 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
 
-  // Group state
+  // ---- Group state ----
   const [groups, setGroups] = useState([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupsError, setGroupsError] = useState("");
@@ -129,6 +201,7 @@ function App() {
 
   const job = useJobPolling(activeJobId);
 
+  // Clear stored job IDs when the job reaches a terminal state.
   useEffect(() => {
     if (job?.status === "done" || job?.status === "failed") {
       localStorage.removeItem("activeJobId");
@@ -136,6 +209,7 @@ function App() {
     }
   }, [job?.status]);
 
+  // Load repo and group lists when the BROWSE view is shown.
   useEffect(() => {
     if (view !== VIEW.BROWSE) return;
     let cancelled = false;
@@ -147,11 +221,13 @@ function App() {
       setGroupsError("");
       try {
         const [repos, grps] = await Promise.all([
-          api.listRepositories(),
+          api.listRepositories(0, REPOS_PAGE_SIZE + 1),
           api.listGroups(),
         ]);
         if (!cancelled) {
-          setRepositories(repos);
+          const hasMore = repos.length > REPOS_PAGE_SIZE;
+          setRepositories(hasMore ? repos.slice(0, REPOS_PAGE_SIZE) : repos);
+          setHasMoreRepos(hasMore);
           setGroups(grps);
         }
       } catch (err) {
@@ -168,12 +244,25 @@ function App() {
     return () => { cancelled = true; };
   }, [view]);
 
-  // ---- Keyboard navigation in wiki view ----
+  const loadMoreRepositories = useCallback(async () => {
+    setRepoLoadingMore(true);
+    try {
+      const more = await api.listRepositories(repositories.length, REPOS_PAGE_SIZE + 1);
+      const hasMore = more.length > REPOS_PAGE_SIZE;
+      setRepositories((prev) => [...prev, ...(hasMore ? more.slice(0, REPOS_PAGE_SIZE) : more)]);
+      setHasMoreRepos(hasMore);
+    } catch (err) {
+      setBrowseError(err.message || "No se pudieron cargar más repositorios.");
+    } finally {
+      setRepoLoadingMore(false);
+    }
+  }, [repositories.length]);
+
+  // Keyboard navigation between wiki pages (Alt+← / Alt+→).
   useEffect(() => {
     if (view !== VIEW.WIKI || !pages.length) return;
 
     const handler = (e) => {
-      // Don't steal keys when user is typing
       if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
 
       if (e.altKey && e.key === "ArrowLeft") {
@@ -195,6 +284,8 @@ function App() {
     return () => document.removeEventListener("keydown", handler);
   }, [view, pages]);
 
+  // ---- Repository handlers ----
+
   const openExistingRepository = async (repo) => {
     try {
       let structure = null;
@@ -214,7 +305,7 @@ function App() {
       setActiveSlug(structure.pages[0]?.slug || null);
       setView(VIEW.WIKI);
     } catch (err) {
-      setBrowseError(err.message || "No se pudo abrir este repositorio.");
+      setBrowseError(`Error al abrir "${repo.name}": ${err.message || "Error desconocido"}`);
     }
   };
 
@@ -229,72 +320,6 @@ function App() {
     setReindexPrefill(repo);
     setSubmitError("");
     setView(VIEW.CONNECT);
-  };
-
-  // ---- Group handlers ----
-
-  const openExistingGroup = async (group) => {
-    try {
-      let detail = null;
-      try {
-        detail = await api.getGroup(group.id);
-        offlineCache.setGroup(group.id, detail);
-      } catch (netErr) {
-        const cached = await offlineCache.getGroup(group.id);
-        if (cached) {
-          detail = cached;
-        } else {
-          throw netErr;
-        }
-      }
-      setActiveGroup(detail);
-      setView(VIEW.GROUP_WIKI);
-    } catch (err) {
-      setGroupsError(err.message || "No se pudo abrir el grupo.");
-    }
-  };
-
-  const handleDeleteGroup = async (groupId) => {
-    await api.deleteGroup(groupId);
-    offlineCache.clearGroup(groupId);
-    setGroups((prev) => prev.filter((g) => g.id !== groupId));
-  };
-
-  const handleReindexGroup = (group) => {
-    offlineCache.clearGroup(group.id);
-    setReindexGroupPrefill(group);
-    setGroupSubmitError("");
-    setView(VIEW.GROUP_CONNECT);
-  };
-
-  const handleGroupConnect = async (payload) => {
-    setIsGroupSubmitting(true);
-    setGroupSubmitError("");
-    try {
-      const res = await api.indexGroup(payload);
-      setActiveGroupJobId(res.job_id);
-      setActiveGroupId(res.group_id);
-      setView(VIEW.GROUP_INDEXING);
-    } catch (err) {
-      setGroupSubmitError(err.message || "No se pudo iniciar el indexado del grupo.");
-    } finally {
-      setIsGroupSubmitting(false);
-    }
-  };
-
-  const handleGroupJobDone = async (job) => {
-    if (job.group_id) {
-      try {
-        const detail = await api.getGroup(job.group_id);
-        offlineCache.setGroup(job.group_id, detail);
-        setActiveGroup(detail);
-        setView(VIEW.GROUP_WIKI);
-      } catch {
-        setView(VIEW.BROWSE);
-      }
-    } else {
-      setView(VIEW.BROWSE);
-    }
   };
 
   const handleConnect = async (payload) => {
@@ -314,19 +339,20 @@ function App() {
     }
   };
 
+  // Transition to WIKI view automatically when the indexing job completes.
   useEffect(() => {
     if (job?.status === "done" && job.repository_id) {
       api.getWikiStructure(job.repository_id).then((structure) => {
         offlineCache.setStructure(job.repository_id, structure);
         setRepository(structure.repository);
         setPages(structure.pages);
-        const firstSlug = structure.pages[0]?.slug;
-        setActiveSlug(firstSlug || null);
+        setActiveSlug(structure.pages[0]?.slug || null);
         setView(VIEW.WIKI);
       });
     }
   }, [job?.status, job?.repository_id]);
 
+  // Load the active wiki page whenever the slug or repository changes.
   useEffect(() => {
     if (!repository || !activeSlug) return;
     let cancelled = false;
@@ -379,6 +405,74 @@ function App() {
     setActivePage(updated);
   };
 
+  // ---- Group handlers ----
+
+  const openExistingGroup = async (group) => {
+    try {
+      let detail = null;
+      try {
+        detail = await api.getGroup(group.id);
+        offlineCache.setGroup(group.id, detail);
+      } catch (netErr) {
+        const cached = await offlineCache.getGroup(group.id);
+        if (cached) {
+          detail = cached;
+        } else {
+          throw netErr;
+        }
+      }
+      setActiveGroup(detail);
+      setView(VIEW.GROUP_WIKI);
+    } catch (err) {
+      setGroupsError(`Error al abrir el grupo "${group.name}": ${err.message || "Error desconocido"}`);
+    }
+  };
+
+  const handleDeleteGroup = async (groupId) => {
+    await api.deleteGroup(groupId);
+    offlineCache.clearGroup(groupId);
+    setGroups((prev) => prev.filter((g) => g.id !== groupId));
+  };
+
+  const handleReindexGroup = (group) => {
+    offlineCache.clearGroup(group.id);
+    setReindexGroupPrefill(group);
+    setGroupSubmitError("");
+    setView(VIEW.GROUP_CONNECT);
+  };
+
+  const handleGroupConnect = async (payload) => {
+    setIsGroupSubmitting(true);
+    setGroupSubmitError("");
+    try {
+      const res = await api.indexGroup(payload);
+      setActiveGroupJobId(res.job_id);
+      setActiveGroupId(res.group_id);
+      setView(VIEW.GROUP_INDEXING);
+    } catch (err) {
+      setGroupSubmitError(err.message || "No se pudo iniciar el indexado del grupo.");
+    } finally {
+      setIsGroupSubmitting(false);
+    }
+  };
+
+  const handleGroupJobDone = async (job) => {
+    if (job.group_id) {
+      try {
+        const detail = await api.getGroup(job.group_id);
+        offlineCache.setGroup(job.group_id, detail);
+        setActiveGroup(detail);
+        setView(VIEW.GROUP_WIKI);
+      } catch {
+        setView(VIEW.BROWSE);
+      }
+    } else {
+      setView(VIEW.BROWSE);
+    }
+  };
+
+  // ---- Render ----
+
   if (view === VIEW.BROWSE) {
     return (
       <RepositoryBrowser
@@ -392,6 +486,9 @@ function App() {
         }}
         onDeleteRepository={handleDeleteRepository}
         onReindexRepository={handleReindexRepository}
+        hasMoreRepos={hasMoreRepos}
+        onLoadMoreRepos={loadMoreRepositories}
+        loadingMoreRepos={repoLoadingMore}
         groups={groups}
         groupsLoading={groupsLoading}
         groupsError={groupsError}
@@ -455,48 +552,24 @@ function App() {
     );
   }
 
-  // view === VIEW.WIKI
   return (
-    <div style={{ display: "flex" }}>
-      <WikiSidebar
-        repository={repository}
-        pages={pages}
-        activeSlug={activeSlug}
-        onSelectPage={setActiveSlug}
-        onReset={handleReset}
-        onOpenSearch={() => setSearchOpen(true)}
-        onOpenGraph={() => setGraphOpen(true)}
-        onReindex={handleReindexRepository}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-      />
-      <main style={{ flex: 1, height: "100vh", overflowY: "auto", position: "relative" }}>
-        {pageLoading && !activePage && <PageSkeleton />}
-        {pageLoading && activePage && (
-          <div style={skeletonStyles.loadingBar}>
-            <div style={skeletonStyles.loadingBarInner} />
-          </div>
-        )}
-        {activePage && (
-          <WikiPageContent
-            page={activePage}
-            repositoryId={repository?.id}
-            onUpdatePage={handleUpdatePage}
-          />
-        )}
-      </main>
-      {repository && <AskPanel repositoryId={repository.id} ragAvailable={repository.indexed_in_qdrant} />}
-      {searchOpen && repository && (
-        <CodeSearch
-          repositoryId={repository.id}
-          ragAvailable={repository.indexed_in_qdrant}
-          onClose={() => setSearchOpen(false)}
-        />
-      )}
-      {graphOpen && repository && (
-        <DependencyGraphView repositoryId={repository.id} onClose={() => setGraphOpen(false)} />
-      )}
-    </div>
+    <WikiLayout
+      repository={repository}
+      pages={pages}
+      activeSlug={activeSlug}
+      activePage={activePage}
+      pageLoading={pageLoading}
+      onSelectPage={setActiveSlug}
+      onReset={handleReset}
+      onReindex={handleReindexRepository}
+      onUpdatePage={handleUpdatePage}
+      searchOpen={searchOpen}
+      graphOpen={graphOpen}
+      setSearchOpen={setSearchOpen}
+      setGraphOpen={setGraphOpen}
+      theme={theme}
+      onToggleTheme={toggleTheme}
+    />
   );
 }
 

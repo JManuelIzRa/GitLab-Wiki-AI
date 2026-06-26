@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     rate_limit_index: str = "5/minute"   # máx. jobs de indexado nuevos por IP
     rate_limit_chat: str = "30/minute"   # máx. preguntas de chat por IP
 
+    # --- Chat cache ---
+    chat_cache_max: int = 256            # max cached RAG answers stored per repo
+
+    # --- Group indexing ---
+    group_concurrency: int = 3           # repos indexed in parallel per group job
+
     @field_validator("openai_url", "embedding_url")
     @classmethod
     def _validate_http_url(cls, v: str) -> str:

@@ -1,6 +1,18 @@
 import { useState, useCallback } from "react";
 import { api } from "../api/client";
 
+function validateGitLabUrl(url) {
+  if (!url.trim()) return "La URL es obligatoria";
+  if (!/^https?:\/\/.+\..+/.test(url.trim())) return "La URL debe comenzar con http:// o https:// e incluir un dominio válido";
+  return null;
+}
+
+function validateProjectPath(path) {
+  if (!path.trim()) return "La ruta del proyecto es obligatoria";
+  if (/[<>"\s]/.test(path.trim())) return "La ruta no puede contener espacios ni caracteres especiales";
+  return null;
+}
+
 /**
  * Pantalla inicial: pide los datos de conexión a GitLab self-hosted o gitlab.com
  * y arranca el job de indexado al enviar.
@@ -14,11 +26,15 @@ export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, pref
   const [branches, setBranches] = useState([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState("");
+  const [urlError, setUrlError] = useState("");
+  const [pathError, setPathError] = useState("");
   const isReindex = Boolean(prefill);
 
   const fetchBranches = useCallback(async () => {
-    if (!gitlabUrl.trim() || !projectPath.trim() || !privateToken.trim()) {
-      setBranchesError("Completa la URL, ruta del proyecto y token antes de cargar las ramas.");
+    const urlErr = validateGitLabUrl(gitlabUrl);
+    if (urlErr) { setBranchesError(urlErr); return; }
+    if (!projectPath.trim() || !privateToken.trim()) {
+      setBranchesError("Completa la ruta del proyecto y el token antes de cargar las ramas.");
       return;
     }
     setBranchesLoading(true);
@@ -41,7 +57,11 @@ export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, pref
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!gitlabUrl.trim() || !projectPath.trim() || !privateToken.trim()) return;
+    const urlErr = validateGitLabUrl(gitlabUrl);
+    const pathErr = validateProjectPath(projectPath);
+    setUrlError(urlErr || "");
+    setPathError(pathErr || "");
+    if (urlErr || pathErr || !privateToken.trim()) return;
     onSubmit({
       gitlab_url: gitlabUrl.trim().replace(/\/+$/, ""),
       project_path: projectPath.trim().replace(/^\/+/, ""),
@@ -76,24 +96,26 @@ export function ConnectForm({ onSubmit, isSubmitting, errorMessage, onBack, pref
             <input
               type="text"
               value={gitlabUrl}
-              onChange={(e) => setGitlabUrl(e.target.value)}
+              onChange={(e) => { setGitlabUrl(e.target.value); setUrlError(""); }}
               placeholder="https://gitlab.com"
-              style={{ ...styles.input, ...(isReindex ? styles.inputLocked : {}) }}
+              style={{ ...styles.input, ...(isReindex ? styles.inputLocked : {}), ...(urlError ? styles.inputError : {}) }}
               disabled={isReindex}
               required
             />
+            {urlError && <span style={styles.fieldError}>{urlError}</span>}
           </Field>
 
           <Field label="Ruta del proyecto" hint="grupo/subgrupo/proyecto, sin la URL">
             <input
               type="text"
               value={projectPath}
-              onChange={(e) => setProjectPath(e.target.value)}
+              onChange={(e) => { setProjectPath(e.target.value); setPathError(""); }}
               placeholder="mi-grupo/mi-proyecto"
-              style={{ ...styles.input, ...(isReindex ? styles.inputLocked : {}) }}
+              style={{ ...styles.input, ...(isReindex ? styles.inputLocked : {}), ...(pathError ? styles.inputError : {}) }}
               disabled={isReindex}
               required
             />
+            {pathError && <span style={styles.fieldError}>{pathError}</span>}
           </Field>
 
           <Field label="Personal Access Token" hint="scopes: read_api, read_repository">
@@ -311,5 +333,13 @@ const styles = {
     fontSize: 11,
     color: "var(--accent-red)",
     fontFamily: "var(--font-mono)",
+  },
+  fieldError: {
+    fontSize: 11,
+    color: "var(--accent-red)",
+    fontFamily: "var(--font-mono)",
+  },
+  inputError: {
+    borderColor: "var(--accent-red)",
   },
 };
