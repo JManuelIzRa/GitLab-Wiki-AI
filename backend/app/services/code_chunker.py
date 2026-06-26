@@ -94,10 +94,59 @@ def _char_idx_to_line(text: str, char_idx: int) -> int:
     return text.count("\n", 0, char_idx) + 1
 
 
-def _fallback_single_chunk(file_path: str, content: str) -> list[CodeChunk]:
-    """Usado cuando no hay gramática tree-sitter para el lenguaje, o el parseo falla."""
-    line_count = content.count("\n") + 1
-    return [CodeChunk(file_path=file_path, chunk_index=0, start_line=1, end_line=line_count, content=content)]
+def _fallback_line_chunks(file_path: str, content: str) -> list[CodeChunk]:
+    """
+    Line-based chunking fallback for when tree-sitter is unavailable or fails.
+
+    Accumulates lines until the chunk would exceed `code_chunk_max_chars`, then starts
+    a new chunk overlapping by `code_chunk_lines_overlap` lines. This guarantees that:
+    - No chunk exceeds the configured char limit (important for embedding services).
+    - Large files produce multiple searchable chunks even without AST awareness.
+    - Small files that fit entirely within the limit return a single chunk.
+    """
+    lines = content.splitlines()
+    if not lines:
+        return []
+
+    max_chars = settings.code_chunk_max_chars
+    overlap = settings.code_chunk_lines_overlap
+    chunks: list[CodeChunk] = []
+    i = 0  # index of the first line of the current chunk
+
+    while i < len(lines):
+        chunk_lines: list[str] = []
+        char_count = 0
+        j = i
+        while j < len(lines):
+            line = lines[j]
+            # Account for the joining newline between lines.
+            addition = len(line) + (1 if chunk_lines else 0)
+            if chunk_lines and char_count + addition > max_chars:
+                break
+            chunk_lines.append(line)
+            char_count += addition
+            j += 1
+
+        if not chunk_lines:
+            # Degenerate: a single line exceeds max_chars — include it truncated.
+            chunk_lines = [lines[i][:max_chars]]
+            j = i + 1
+
+        chunks.append(CodeChunk(
+            file_path=file_path,
+            chunk_index=len(chunks),
+            start_line=i + 1,
+            end_line=j,
+            content="\n".join(chunk_lines),
+        ))
+
+        if j >= len(lines):
+            break
+
+        # Advance by (chunk_size − overlap) so successive chunks share context lines.
+        i += max(1, len(chunk_lines) - overlap)
+
+    return chunks
 
 
 def chunk_file(file_path: str, content: str, language: str | None = None, parser=None) -> list[CodeChunk]:
@@ -120,7 +169,7 @@ def chunk_file(file_path: str, content: str, language: str | None = None, parser
         language = EXTENSION_TO_TREE_SITTER_LANGUAGE.get(ext)
 
     if language is None:
-        return _fallback_single_chunk(file_path, content)
+        return _fallback_line_chunks(file_path, content)
 
     try:
         splitter = _get_code_splitter(language, parser=parser)
@@ -131,10 +180,10 @@ def chunk_file(file_path: str, content: str, language: str | None = None, parser
     except Exception as e:  # noqa: BLE001 - parser inexistente, código con sintaxis inválida, etc.
         logger.warning("CodeSplitter falló para '%s' (lenguaje=%s): %s; usando chunk único.",
                         file_path, language, e)
-        return _fallback_single_chunk(file_path, content)
+        return _fallback_line_chunks(file_path, content)
 
     if not nodes:
-        return _fallback_single_chunk(file_path, content)
+        return _fallback_line_chunks(file_path, content)
 
     chunks: list[CodeChunk] = []
     for i, node in enumerate(nodes):
