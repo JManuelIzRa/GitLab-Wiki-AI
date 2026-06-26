@@ -18,14 +18,16 @@ from app.api.routes import router
 from app.core.config import settings
 from app.db.session import init_db
 from app.services.embedding_client import get_embedding_client
+from app.services.wiki_generator import WikiGenerator
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    # Warm up the embedding model so the first search/chat request isn't slow
     get_embedding_client()
+    app.state.wiki_generator = WikiGenerator()
     yield
+    await app.state.wiki_generator.close()
 
 
 app = FastAPI(

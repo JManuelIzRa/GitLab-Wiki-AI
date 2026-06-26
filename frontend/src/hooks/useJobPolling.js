@@ -2,40 +2,42 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 
 /**
- * Hace polling de un job de indexado hasta que termina (done o failed).
- * Se detiene automáticamente al llegar a un estado terminal o al desmontar.
+ * Polls a job until it reaches a terminal state (done or failed).
+ * Uses an adaptive interval: fast (1.5s) for the first 15s, then slow (3s).
+ * Uses recursive setTimeout rather than setInterval so the interval can change
+ * between polls and so a slow network response doesn't cause overlapping requests.
  */
 export function useJobPolling(jobId) {
   const [job, setJob] = useState(null);
-  const intervalRef = useRef(null);
+  const cancelRef = useRef(false);
+  const startTimeRef = useRef(null);
 
   useEffect(() => {
     if (!jobId) return;
-
-    let cancelled = false;
+    cancelRef.current = false;
+    startTimeRef.current = Date.now();
 
     const poll = async () => {
+      if (cancelRef.current) return;
       try {
         const data = await api.getJobStatus(jobId);
-        if (cancelled) return;
+        if (cancelRef.current) return;
         setJob(data);
-        if (data.status === "done" || data.status === "failed") {
-          clearInterval(intervalRef.current);
-        }
+        if (data.status === "done" || data.status === "failed") return;
       } catch (err) {
-        if (!cancelled) {
-          setJob((prev) => ({ ...(prev || {}), status: "failed", error_message: err.message }));
-          clearInterval(intervalRef.current);
-        }
+        if (cancelRef.current) return;
+        setJob((prev) => ({ ...(prev || {}), status: "failed", error_message: err.message }));
+        return;
       }
+      const elapsed = Date.now() - startTimeRef.current;
+      const delay = elapsed < 15_000 ? 1_500 : 3_000;
+      setTimeout(poll, delay);
     };
 
-    poll(); // primera consulta inmediata
-    intervalRef.current = setInterval(poll, 1500);
+    poll();
 
     return () => {
-      cancelled = true;
-      clearInterval(intervalRef.current);
+      cancelRef.current = true;
     };
   }, [jobId]);
 

@@ -19,7 +19,10 @@ const VIEW = {
 };
 
 function App() {
-  const [view, setView] = useState(VIEW.BROWSE);
+  // Restore an in-progress job from localStorage so a browser refresh doesn't lose tracking.
+  const [view, setView] = useState(() =>
+    localStorage.getItem("activeJobId") ? VIEW.INDEXING : VIEW.BROWSE
+  );
 
   // --- Estado de la lista de repos ya indexados ---
   const [repositories, setRepositories] = useState([]);
@@ -29,8 +32,13 @@ function App() {
   // --- Estado del formulario de conexión / nuevo indexado ---
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeJobId, setActiveJobId] = useState(null);
-  const [projectPathLabel, setProjectPathLabel] = useState("");
+  const [activeJobId, setActiveJobId] = useState(() => {
+    const stored = localStorage.getItem("activeJobId");
+    return stored ? parseInt(stored, 10) : null;
+  });
+  const [projectPathLabel, setProjectPathLabel] = useState(
+    () => localStorage.getItem("activeJobPath") || ""
+  );
   const [reindexPrefill, setReindexPrefill] = useState(null);
 
   // --- Estado del wiki actualmente abierto ---
@@ -43,6 +51,14 @@ function App() {
   const [graphOpen, setGraphOpen] = useState(false);
 
   const job = useJobPolling(activeJobId);
+
+  // Clear persisted job data when it reaches a terminal state.
+  useEffect(() => {
+    if (job?.status === "done" || job?.status === "failed") {
+      localStorage.removeItem("activeJobId");
+      localStorage.removeItem("activeJobPath");
+    }
+  }, [job?.status]);
 
   // --- Cargar la lista de repos ya indexados al entrar a la pantalla BROWSE ---
 
@@ -99,6 +115,8 @@ function App() {
     setSubmitError("");
     try {
       const res = await api.indexRepository(payload);
+      localStorage.setItem("activeJobId", String(res.job_id));
+      localStorage.setItem("activeJobPath", payload.project_path);
       setProjectPathLabel(payload.project_path);
       setActiveJobId(res.job_id);
       setView(VIEW.INDEXING);
@@ -144,6 +162,8 @@ function App() {
   }, [repository, activeSlug]);
 
   const handleReset = () => {
+    localStorage.removeItem("activeJobId");
+    localStorage.removeItem("activeJobPath");
     setView(VIEW.BROWSE);
     setActiveJobId(null);
     setRepository(null);
@@ -153,6 +173,11 @@ function App() {
     setSubmitError("");
     setSearchOpen(false);
     setGraphOpen(false);
+  };
+
+  const handleUpdatePage = async (slug, newMarkdown) => {
+    const updated = await api.updateWikiPage(repository.id, slug, newMarkdown);
+    setActivePage(updated);
   };
 
   if (view === VIEW.BROWSE) {
@@ -204,7 +229,7 @@ function App() {
         {pageLoading && !activePage ? (
           <div style={{ padding: 56, color: "var(--text-tertiary)", fontSize: 13 }}>Cargando página…</div>
         ) : (
-          <WikiPageContent page={activePage} />
+          <WikiPageContent page={activePage} onUpdatePage={handleUpdatePage} />
         )}
       </main>
       {repository && <AskPanel repositoryId={repository.id} ragAvailable={repository.indexed_in_qdrant} />}

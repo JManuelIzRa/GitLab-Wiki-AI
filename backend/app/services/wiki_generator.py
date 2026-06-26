@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import httpx
 from openai import AsyncOpenAI
 
 from app.core.config import settings
@@ -97,8 +98,12 @@ class WikiGenerator:
         self._client = AsyncOpenAI(
             base_url=base_url or settings.openai_url,
             api_key=api_key or settings.openai_api_key,
+            timeout=httpx.Timeout(60.0),
         )
         self.model = model or settings.openai_chat_model
+
+    async def close(self) -> None:
+        await self._client.close()
 
     async def _ask(self, user_prompt: str, system_prompt: str = SYSTEM_PROMPT, max_tokens: int | None = None) -> str:
         response = await self._client.chat.completions.create(

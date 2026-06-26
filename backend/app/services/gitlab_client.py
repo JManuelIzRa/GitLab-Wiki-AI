@@ -7,6 +7,7 @@ y para que el resto del código no dependa de una librería externa pesada.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from dataclasses import dataclass
@@ -23,6 +24,10 @@ class GitLabAuthError(Exception):
 
 class GitLabNotFoundError(Exception):
     """El proyecto, branch o archivo no existe."""
+
+
+class GitLabRateLimitError(Exception):
+    """GitLab rate limit exceeded after all retries."""
 
 
 @dataclass
@@ -51,9 +56,10 @@ class GitLabClient:
     o llamar a close() cuando se termina de usar.
     """
 
-    def __init__(self, base_url: str, private_token: str, timeout: float = 30.0):
+    def __init__(self, base_url: str, private_token: str, timeout: float = 30.0, max_retries: int = 4):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}/api/v4"
+        self._max_retries = max_retries
         self._http = httpx.AsyncClient(
             headers={"PRIVATE-TOKEN": private_token},
             timeout=timeout,
@@ -69,13 +75,27 @@ class GitLabClient:
         await self.close()
 
     async def _get(self, url: str, params: dict | None = None) -> httpx.Response:
-        resp = await self._http.get(url, params=params)
-        if resp.status_code == 401:
-            raise GitLabAuthError("Token inválido, expirado o sin permisos suficientes (scope read_api/read_repository).")
-        if resp.status_code == 404:
-            raise GitLabNotFoundError(f"Recurso no encontrado en GitLab: {url}")
-        resp.raise_for_status()
-        return resp
+        for attempt in range(self._max_retries + 1):
+            resp = await self._http.get(url, params=params)
+            if resp.status_code == 429:
+                if attempt < self._max_retries:
+                    wait = int(resp.headers.get("Retry-After", 2 ** attempt))
+                    logger.warning(
+                        "GitLab rate limit on %s; retrying in %ds (attempt %d/%d)",
+                        url, wait, attempt + 1, self._max_retries,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise GitLabRateLimitError(
+                    f"GitLab rate limit exceeded after {self._max_retries} retries for {url}"
+                )
+            if resp.status_code == 401:
+                raise GitLabAuthError("Token inválido, expirado o sin permisos suficientes (scope read_api/read_repository).")
+            if resp.status_code == 404:
+                raise GitLabNotFoundError(f"Recurso no encontrado en GitLab: {url}")
+            resp.raise_for_status()
+            return resp
+        raise GitLabRateLimitError(f"GitLab rate limit exceeded after {self._max_retries} retries for {url}")
 
     async def get_project(self, project_path: str) -> GitLabProject:
         """project_path puede ser 'grupo/subgrupo/proyecto' (se URL-encodea)."""

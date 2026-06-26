@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { Pencil, Check, X } from "lucide-react";
 import mermaid from "../utils/mermaid";
 
 function MermaidDiagram({ code }) {
@@ -39,13 +40,80 @@ function MermaidDiagram({ code }) {
   return <div ref={containerRef} style={styles.mermaidContainer} />;
 }
 
-export function WikiPageContent({ page }) {
+export function WikiPageContent({ page, onUpdatePage }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedContent, setEditedContent] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  // Exit edit mode whenever the user navigates to a different page.
+  useEffect(() => {
+    setIsEditing(false);
+    setEditedContent("");
+    setSaveError("");
+  }, [page?.slug]);
+
   if (!page) return null;
+
+  const handleEditStart = () => {
+    setEditedContent(page.content_markdown);
+    setSaveError("");
+    setIsEditing(true);
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveError("");
+    try {
+      await onUpdatePage(page.slug, editedContent);
+      setIsEditing(false);
+    } catch (err) {
+      setSaveError(err.message || "No se pudo guardar la página.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setIsEditing(false);
+    setEditedContent("");
+    setSaveError("");
+  };
 
   return (
     <article style={styles.article}>
-      <h1 style={styles.h1}>{page.title}</h1>
+      <div style={styles.pageHeader}>
+        <h1 style={styles.h1}>{page.title}</h1>
+        {onUpdatePage && !isEditing && (
+          <button onClick={handleEditStart} style={styles.editButton} title="Editar página">
+            <Pencil size={14} />
+            Editar
+          </button>
+        )}
+        {isEditing && (
+          <div style={styles.editActions}>
+            {saveError && <span style={styles.saveError}>{saveError}</span>}
+            <button onClick={handleSave} disabled={isSaving} style={styles.saveButton}>
+              <Check size={14} />
+              {isSaving ? "Guardando…" : "Guardar"}
+            </button>
+            <button onClick={handleCancel} disabled={isSaving} style={styles.cancelButton}>
+              <X size={14} />
+              Cancelar
+            </button>
+          </div>
+        )}
+      </div>
 
+      {isEditing ? (
+        <textarea
+          value={editedContent}
+          onChange={(e) => setEditedContent(e.target.value)}
+          style={styles.editor}
+          spellCheck={false}
+          autoFocus
+        />
+      ) : (
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -95,6 +163,7 @@ export function WikiPageContent({ page }) {
       >
         {page.content_markdown}
       </ReactMarkdown>
+      )}
 
       {page.source_files?.length > 0 && (
         <div style={styles.sourcesBox}>
@@ -118,12 +187,88 @@ const styles = {
     margin: "0 auto",
     padding: "56px 32px 120px",
   },
+  pageHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+    marginBottom: 28,
+  },
+  editButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    flexShrink: 0,
+    marginTop: 6,
+    padding: "5px 12px",
+    fontSize: 12,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-tertiary)",
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 6,
+    cursor: "pointer",
+  },
+  editActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 0,
+    marginTop: 6,
+  },
+  saveButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "5px 12px",
+    fontSize: 12,
+    fontFamily: "var(--font-mono)",
+    color: "#fff",
+    background: "var(--accent-rust)",
+    border: "none",
+    borderRadius: 6,
+    cursor: "pointer",
+  },
+  cancelButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "5px 12px",
+    fontSize: 12,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-secondary)",
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 6,
+    cursor: "pointer",
+  },
+  saveError: {
+    fontSize: 11,
+    color: "var(--accent-red)",
+    fontFamily: "var(--font-mono)",
+  },
+  editor: {
+    width: "100%",
+    minHeight: 480,
+    padding: "16px",
+    fontSize: 13.5,
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-primary)",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 8,
+    resize: "vertical",
+    outline: "none",
+    lineHeight: 1.6,
+    boxSizing: "border-box",
+    marginBottom: 8,
+  },
   h1: {
     fontFamily: "var(--font-serif)",
     fontSize: 36,
     fontWeight: 700,
     color: "var(--text-primary)",
-    margin: "0 0 28px",
+    margin: 0,
     letterSpacing: "-0.01em",
     lineHeight: 1.2,
   },

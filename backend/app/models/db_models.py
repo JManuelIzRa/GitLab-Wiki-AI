@@ -39,6 +39,7 @@ class Repository(Base):
     last_commit_sha: Mapped[str] = mapped_column(String(64), default="")
     indexed_in_qdrant: Mapped[bool] = mapped_column(default=False)  # True si el código se embebió correctamente
     dependency_graph: Mapped[dict] = mapped_column(JSON, default=dict)  # {"nodes": [...], "edges": [...]}
+    file_hashes: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)  # {path: sha256} for incremental re-embedding
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
