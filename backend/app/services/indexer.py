@@ -138,7 +138,10 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
             if c
         ]
 
-        generator = WikiGenerator()
+        generator = WikiGenerator(
+            language=repo.wiki_language or None,
+            prompt_overrides=repo.prompt_overrides or None,
+        )
         system_prompt_override = repo.system_prompt or None
         new_pages: list[WikiPage] = []
         order_counter = 0

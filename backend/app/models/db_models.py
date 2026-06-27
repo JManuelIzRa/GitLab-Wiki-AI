@@ -139,6 +139,11 @@ class Repository(Base):
     gitlab_token: Mapped[str] = mapped_column(String(512), default="")
     # Custom LLM system prompt override for this repo's wiki generation (empty = use default).
     system_prompt: Mapped[str] = mapped_column(Text, default="")
+    # JSON dict that overrides individual prompt template keys (overview, architecture, module, setup).
+    # Keys match _PROMPTS[lang] — only supplied keys are overridden, rest use the language default.
+    prompt_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    # ISO language code for generated wiki content for this repo ("" = use global WIKI_LANGUAGE setting).
+    wiki_language: Mapped[str] = mapped_column(String(8), default="")
     # Optional FK to the GitLab group this repo belongs to (SET NULL on group delete)
     group_id: Mapped[int | None] = mapped_column(
         ForeignKey("gitlab_groups.id", ondelete="SET NULL"), nullable=True, index=True
@@ -207,6 +212,21 @@ class WikiPageRevision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     wiki_page: Mapped["WikiPage"] = relationship(back_populates="revisions")
+
+
+class IndexLock(Base):
+    """DB-level advisory lock for repo indexing.
+
+    A unique-constrained row prevents two processes from simultaneously starting
+    an index job for the same repo_key. Expired locks (crashed workers) are cleaned
+    up automatically on the next acquisition attempt.
+    """
+    __tablename__ = "index_locks"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    repo_key: Mapped[str] = mapped_column(String(512), unique=True, index=True)
+    locked_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
 
 
 class WikiCache(Base):

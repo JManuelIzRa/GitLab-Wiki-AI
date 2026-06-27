@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 # Namespace fijo para generar UUIDs deterministas a partir de chunk_id (mismo input -> mismo UUID).
 _POINT_ID_NAMESPACE = uuid.UUID("a51e0e0a-3c2c-4f3b-9b8e-5a2f0a6e8d10")
 
+# Shared singleton: one AsyncQdrantClient for the entire process lifetime.
+# asyncio is single-threaded so sharing is safe; avoids per-VectorStore connection overhead.
+_shared_qdrant_client: AsyncQdrantClient | None = None
+
+
+def _get_qdrant_client() -> AsyncQdrantClient:
+    global _shared_qdrant_client
+    if _shared_qdrant_client is None:
+        _shared_qdrant_client = AsyncQdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+    return _shared_qdrant_client
+
 
 @dataclass
 class RetrievedChunk:
@@ -41,7 +52,7 @@ class VectorStore:
     def __init__(self, repository_id: int):
         self.repository_id = repository_id
         self.collection_name = f"{settings.qdrant_collection_prefix}{repository_id}"
-        self._client = AsyncQdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+        self._client = _get_qdrant_client()
 
     @staticmethod
     def _point_id(chunk_id: str) -> str:
@@ -130,13 +141,13 @@ class VectorStore:
             logger.warning("Failed to delete points for paths in '%s'", self.collection_name, exc_info=True)
 
     async def close(self) -> None:
-        await self._client.close()
+        pass  # Shared singleton — do not close
 
     @staticmethod
     async def cleanup_orphan_collections(known_repo_ids: set[int]) -> None:
         """Delete Qdrant collections whose repo ID is no longer in the database."""
         prefix = settings.qdrant_collection_prefix
-        client = AsyncQdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+        client = _get_qdrant_client()
         try:
             response = await client.get_collections()
             for col in response.collections:
@@ -156,5 +167,3 @@ class VectorStore:
                         logger.warning("Failed to delete orphan collection '%s'", name, exc_info=True)
         except Exception:
             logger.warning("Qdrant orphan cleanup failed; skipping.", exc_info=True)
-        finally:
-            await client.close()

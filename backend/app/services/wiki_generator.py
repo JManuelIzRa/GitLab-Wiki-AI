@@ -329,14 +329,26 @@ def _format_retrieved_chunks(chunks: list[RetrievedChunk]) -> str:
 
 
 class WikiGenerator:
-    def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        language: str | None = None,
+        prompt_overrides: dict | None = None,
+    ):
         self._client = AsyncOpenAI(
             base_url=base_url or settings.openai_url,
             api_key=api_key or settings.openai_api_key,
             timeout=httpx.Timeout(60.0),
         )
         self.model = model or settings.openai_chat_model
-        self._p = _get_prompts(settings.wiki_language)
+        effective_lang = language or settings.wiki_language
+        base_prompts = _get_prompts(effective_lang)
+        if prompt_overrides:
+            self._p = {**base_prompts, **{k: v for k, v in prompt_overrides.items() if v}}
+        else:
+            self._p = base_prompts
 
     async def close(self) -> None:
         await self._client.close()
@@ -353,6 +365,18 @@ class WikiGenerator:
         system_prompt_override: str | None = None,
     ) -> str:
         effective_system = system_prompt_override or (system_prompt if system_prompt is not None else self._p["system"])
+
+        # Hard budget: trim user_prompt so system + user fit within max_chars_per_ai_call.
+        # Individual snippet-level truncation already runs upstream; this is the final safety net.
+        system_chars = len(effective_system)
+        user_budget = max(500, settings.max_chars_per_ai_call - system_chars)
+        if len(user_prompt) > user_budget:
+            logger.warning(
+                "User prompt (%d chars) exceeds budget (%d); truncating before LLM call.",
+                len(user_prompt), user_budget,
+            )
+            user_prompt = user_prompt[:user_budget] + "\n... [truncated] ..."
+
         _retryable = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError)
         last_exc: Exception | None = None
         for attempt in range(4):
