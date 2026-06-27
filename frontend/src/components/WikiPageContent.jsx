@@ -14,9 +14,6 @@ import { api } from "../api/client";
 function computeLineDiff(aText, bText) {
   const aLines = aText.split("\n");
   const bLines = bText.split("\n");
-  const result = [];
-  let ai = 0;
-  let bi = 0;
   // Build a simple LCS-based diff
   const m = aLines.length;
   const n = bLines.length;
@@ -76,6 +73,7 @@ function MermaidDiagram({ code }) {
   const [zoomed, setZoomed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [svgSnapshot, setSvgSnapshot] = useState("");
   const renderSeq = useRef(0);
   const rawId = useId();
   const baseId = `mermaid-${rawId.replace(/:/g, "")}`;
@@ -84,6 +82,16 @@ function MermaidDiagram({ code }) {
   const [mermaidTheme, setMermaidTheme] = useState(
     () => document.documentElement.getAttribute("data-theme") === "light" ? "default" : "dark"
   );
+
+  // During-render pattern: reset error/loading state when render deps change,
+  // avoiding synchronous setState inside useEffect.
+  const [prevRenderDeps, setPrevRenderDeps] = useState({ code, mermaidTheme, retryCount });
+  if (prevRenderDeps.code !== code || prevRenderDeps.mermaidTheme !== mermaidTheme || prevRenderDeps.retryCount !== retryCount) {
+    setPrevRenderDeps({ code, mermaidTheme, retryCount });
+    setError(null);
+    setIsRendering(true);
+  }
+
   useEffect(() => {
     const mo = new MutationObserver(() => {
       setMermaidTheme(
@@ -104,8 +112,6 @@ function MermaidDiagram({ code }) {
 
   useEffect(() => {
     let cancelled = false;
-    setError(null);
-    setIsRendering(true);
 
     // Unique ID per render call — prevents "element already exists" when code changes
     // while a previous mermaid.render() is still in flight.
@@ -134,6 +140,7 @@ function MermaidDiagram({ code }) {
         clearTimeout(tid);
         if (!cancelled && !timedOut && containerRef.current) {
           containerRef.current.innerHTML = svg;
+          setSvgSnapshot(svg);
           setIsRendering(false);
         }
       })
@@ -152,7 +159,7 @@ function MermaidDiagram({ code }) {
       clearTimeout(tid);
       document.getElementById(`d${renderId}`)?.remove();
     };
-  }, [code, mermaidTheme, retryCount]);
+  }, [baseId, code, mermaidTheme, retryCount]);
 
   const handleCopyCode = useCallback(() => {
     navigator.clipboard.writeText(code).then(() => {
@@ -229,7 +236,7 @@ function MermaidDiagram({ code }) {
             </button>
             <div
               style={styles.zoomContent}
-              dangerouslySetInnerHTML={{ __html: containerRef.current?.innerHTML || "" }}
+              dangerouslySetInnerHTML={{ __html: svgSnapshot }}
             />
           </div>
         </div>
@@ -497,13 +504,17 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
 
   const hideToast = useCallback(() => setToast(null), []);
 
-  useEffect(() => {
+  // Reset editing state when navigating to a different page (during-render pattern,
+  // avoids calling setState inside useEffect which causes an extra render cycle).
+  const [prevSlug, setPrevSlug] = useState(page?.slug);
+  if (prevSlug !== page?.slug) {
+    setPrevSlug(page?.slug);
     setIsEditing(false);
     setEditedContent("");
     setSaveError("");
     setShowRevisions(false);
     setToast(null);
-  }, [page?.slug]);
+  }
 
   if (!page) return null;
 

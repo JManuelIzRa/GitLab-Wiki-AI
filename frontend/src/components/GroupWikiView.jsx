@@ -30,7 +30,7 @@ export function GroupWikiView({ group, onReset, onOpenRepository }) {
     try {
       const res = await api.crossRepoSearch(group.id, searchQuery.trim());
       setSearchResults(res.results || []);
-    } catch (err) {
+    } catch {
       setSearchResults([]);
     } finally {
       setIsSearching(false);
@@ -46,7 +46,6 @@ export function GroupWikiView({ group, onReset, onOpenRepository }) {
     setIsChatStreaming(true);
 
     let accumulated = "";
-    const botIdx = chatHistory.length + 1;
     setChatHistory((prev) => [...prev, { role: "assistant", content: "", sources: [] }]);
 
     try {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { offlineCache } from '../utils/offlineCache'
 
 // jsdom ships a minimal IndexedDB stub; we just verify the API surface works

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, startTransition, useState } from "react";
 
 import { KeyboardShortcutsModal } from "./components/KeyboardShortcutsModal";
 import { RepositoryBrowser } from "./components/RepositoryBrowser";
@@ -282,9 +282,9 @@ function App() {
     const match = window.location.hash.match(/^#page=(.+)$/);
     if (match) {
       const slug = match[1];
-      if (pages.find((p) => p.slug === slug)) setActiveSlug(slug);
+      if (pages.find((p) => p.slug === slug)) startTransition(() => setActiveSlug(slug));
     }
-  }, [view, pages]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, pages]);
 
   // Handle browser back/forward while reading the wiki
   useEffect(() => {

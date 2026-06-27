@@ -273,14 +273,18 @@ export function WikiSidebar({
   const filteredRoot = root.filter(filterPage);
   const filteredModules = modules.filter(filterPage);
 
+  // Derived: hide stale results when query is too short without calling setState in effect body
+  const displayedResults = q.length >= 2 ? wikiSearchResults : null;
+  const displayedLoading = q.length >= 2 && wikiSearchLoading;
+
   // FTS5 wiki-wide search with 400ms debounce
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (q.length < 2) {
-      setWikiSearchResults(null);
       return;
     }
     debounceRef.current = setTimeout(async () => {
+      setWikiSearchResults(null);
       setWikiSearchLoading(true);
       try {
         const results = await api.searchWikiText(repository.id, q);
@@ -408,16 +412,16 @@ export function WikiSidebar({
           style={styles.searchInput}
           aria-label="Buscar en el wiki"
         />
-        {wikiSearchLoading && <div style={styles.searchSpinner}>…</div>}
+        {displayedLoading && <div style={styles.searchSpinner}>…</div>}
       </div>
 
       <nav style={styles.nav}>
         {/* FTS5 full-text search results */}
-        {wikiSearchResults && wikiSearchResults.length > 0 && (
+        {displayedResults && displayedResults.length > 0 && (
           <div style={styles.navSection}>
             <div style={styles.navSectionLabel}>resultados en el wiki</div>
             <div style={styles.navGroup}>
-              {wikiSearchResults.map((r) => (
+              {displayedResults.map((r) => (
                 <button
                   key={r.slug}
                   style={{
@@ -439,12 +443,12 @@ export function WikiSidebar({
             </div>
           </div>
         )}
-        {wikiSearchResults && wikiSearchResults.length === 0 && q.length >= 2 && (
+        {displayedResults && displayedResults.length === 0 && q.length >= 2 && (
           <div style={styles.noResults}>sin resultados para "{q}"</div>
         )}
 
         {/* Regular page nav (hidden when showing FTS results) */}
-        {!wikiSearchResults && (
+        {!displayedResults && (
           <>
             {filteredRoot.length === 0 && filteredModules.length === 0 && (
               <div style={styles.noResults}>sin resultados</div>

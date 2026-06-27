@@ -49,6 +49,14 @@ export function DependencyGraphView({ repositoryId, onClose }) {
     return () => mo.disconnect();
   }, []);
 
+  // During-render pattern: reset isRendering when graph or theme changes,
+  // avoiding synchronous setState inside useEffect.
+  const [prevRenderKey, setPrevRenderKey] = useState({ graph, mermaidTheme });
+  if ((prevRenderKey.graph !== graph || prevRenderKey.mermaidTheme !== mermaidTheme) && graph && graphToMermaid(graph)) {
+    setPrevRenderKey({ graph, mermaidTheme });
+    setIsRendering(true);
+  }
+
   // Close on Escape key
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -82,7 +90,6 @@ export function DependencyGraphView({ repositoryId, onClose }) {
 
     let cancelled = false;
     const renderId = `${baseId}-${++renderSeq.current}`;
-    setIsRendering(true);
 
     mermaid.initialize({
       startOnLoad: false,
@@ -122,7 +129,7 @@ export function DependencyGraphView({ repositoryId, onClose }) {
       clearTimeout(tid);
       document.getElementById(`d${renderId}`)?.remove();
     };
-  }, [graph, mermaidTheme]);
+  }, [baseId, graph, mermaidTheme]);
 
   const handleCopyCode = () => {
     if (!graph) return;
