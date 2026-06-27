@@ -183,7 +183,7 @@ const styles = {
     borderRadius: 6,
     padding: "12px 14px",
     fontSize: 12.5,
-    color: "#E5A99A",
+    color: "var(--text-error)",
     lineHeight: 1.6,
   },
   errorTitle: {

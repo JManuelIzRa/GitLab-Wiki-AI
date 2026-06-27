@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { gitLabCommitUrl } from "../utils/gitlab";
 
 export function JobHistoryPanel({ repository, onClose }) {
+  const trapRef = useFocusTrap();
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -25,7 +27,7 @@ export function JobHistoryPanel({ repository, onClose }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <section className="history-panel" role="dialog" aria-modal="true" aria-label="Historial de indexado" onClick={(e) => e.stopPropagation()}>
+      <section ref={trapRef} className="history-panel" role="dialog" aria-modal="true" aria-label="Historial de indexado" onClick={(e) => e.stopPropagation()}>
         <header><div><strong>Historial de indexado</strong><small>{repository.project_path}</small></div><button onClick={onClose}>✕</button></header>
         <div className="freshness-row">
           <div>

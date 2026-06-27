@@ -194,7 +194,7 @@ const styles = {
     borderRadius: 6,
     padding: "10px 12px",
     fontSize: 12.5,
-    color: "#E5A99A",
+    color: "var(--text-error)",
     marginBottom: 16,
   },
   errorPre: {

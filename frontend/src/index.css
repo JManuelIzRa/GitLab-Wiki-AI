@@ -19,6 +19,12 @@
   --accent-sage-dim: #4F6B58;
   --accent-red: #C0594A;
 
+  --accent-on-rust: #1A1410;
+  --accent-on-sage: #D7E5DC;
+  --text-error: #E5A99A;
+  --text-warning: #D9B98C;
+  --code-bg: #1E1E1E;
+
   --font-serif: 'Source Serif 4', Georgia, serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
 
@@ -43,6 +49,12 @@
   --accent-sage: #4A7A5A;
   --accent-sage-dim: #2E5240;
   --accent-red: #A03828;
+
+  --accent-on-rust: #1A1410;
+  --accent-on-sage: #1E3828;
+  --text-error: #7A2010;
+  --text-warning: #7A5010;
+  --code-bg: #1E1E1E;
 
   color-scheme: light;
 }

@@ -330,7 +330,7 @@ const styles = {
     justifyContent: "center",
     fontSize: 14,
     fontWeight: 700,
-    color: "#1A1410",
+    color: "var(--accent-on-rust)",
     flexShrink: 0,
   },
   groupName: {
@@ -465,7 +465,7 @@ const styles = {
     padding: "10px 18px",
     fontSize: 13,
     fontWeight: 600,
-    color: "#1A1410",
+    color: "var(--accent-on-rust)",
     cursor: "pointer",
   },
   pageTitle: {
@@ -570,7 +570,7 @@ const styles = {
     padding: "10px 18px",
     fontSize: 13,
     fontWeight: 600,
-    color: "#1A1410",
+    color: "var(--accent-on-rust)",
     cursor: "pointer",
   },
   searchResults: {

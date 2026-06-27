@@ -274,7 +274,7 @@ const styles = {
     bottom: 24,
     right: 24,
     background: "var(--accent-rust)",
-    color: "#1A1410",
+    color: "var(--accent-on-rust)",
     border: "none",
     borderRadius: 24,
     padding: "12px 20px",
@@ -328,7 +328,7 @@ const styles = {
   degradedBanner: {
     fontSize: 11,
     lineHeight: 1.5,
-    color: "#D9B98C",
+    color: "var(--text-warning)",
     background: "rgba(201,124,74,0.1)",
     borderBottom: "1px solid var(--border-subtle)",
     padding: "8px 14px",
@@ -376,7 +376,7 @@ const styles = {
     border: "1px solid var(--border-subtle)",
     borderRadius: 6,
     overflow: "hidden",
-    background: "#1E1E1E",
+    background: "var(--code-bg)",
   },
   sourceHeader: {
     display: "flex",
@@ -457,7 +457,7 @@ const styles = {
     padding: "0 14px",
     fontSize: 12,
     fontWeight: 600,
-    color: "#1A1410",
+    color: "var(--accent-on-rust)",
     cursor: "pointer",
   },
   stopBtn: {

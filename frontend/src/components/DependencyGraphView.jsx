@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import mermaid, { MERMAID_DARK_VARS, MERMAID_LIGHT_VARS } from "../utils/mermaid";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { api } from "../api/client";
 
 function sanitizeNodeId(name) {
@@ -25,6 +26,7 @@ function graphToMermaid(graph) {
 }
 
 export function DependencyGraphView({ repositoryId, onClose }) {
+  const dialogRef = useFocusTrap();
   const [graph, setGraph] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -157,7 +159,7 @@ export function DependencyGraphView({ repositoryId, onClose }) {
 
   return (
     <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} style={styles.modal} role="dialog" aria-modal="true" aria-label="Grafo de dependencias" onClick={(e) => e.stopPropagation()}>
         <div style={styles.header}>
           <span style={styles.title}>grafo de dependencias entre módulos</span>
           <div style={styles.headerActions}>
@@ -340,6 +342,6 @@ const styles = {
     borderRadius: 6,
     padding: "10px 12px",
     fontSize: 12.5,
-    color: "#E5A99A",
+    color: "var(--text-error)",
   },
 };

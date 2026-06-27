@@ -249,7 +249,7 @@ const styles = {
     padding: "13px 16px",
     fontSize: 14,
     fontWeight: 600,
-    color: "#1A1410",
+    color: "var(--accent-on-rust)",
     marginTop: 8,
     cursor: "pointer",
   },
@@ -259,7 +259,7 @@ const styles = {
     borderRadius: 6,
     padding: "10px 12px",
     fontSize: 12.5,
-    color: "#E5A99A",
+    color: "var(--text-error)",
     lineHeight: 1.5,
   },
   footnote: {

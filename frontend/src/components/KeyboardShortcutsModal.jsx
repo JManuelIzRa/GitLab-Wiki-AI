@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 const SHORTCUTS = [
   { keys: ["?"], description: "Mostrar / ocultar este panel de atajos" },
@@ -10,6 +11,7 @@ const SHORTCUTS = [
 ];
 
 export function KeyboardShortcutsModal({ onClose }) {
+  const trapRef = useFocusTrap();
   useEffect(() => {
     const handler = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
@@ -18,7 +20,7 @@ export function KeyboardShortcutsModal({ onClose }) {
 
   return (
     <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <div ref={trapRef} style={styles.modal} role="dialog" aria-modal="true" aria-label="Atajos de teclado" onClick={(e) => e.stopPropagation()}>
         <div style={styles.header}>
           <span style={styles.title}>atajos de teclado</span>
           <button onClick={onClose} style={styles.closeBtn} title="Cerrar (Esc)">

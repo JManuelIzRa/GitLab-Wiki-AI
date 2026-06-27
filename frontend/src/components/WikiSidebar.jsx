@@ -227,7 +227,7 @@ const settingsStyles = {
     fontSize: 12,
     fontFamily: "var(--font-mono)",
     background: "var(--accent-rust)",
-    color: "#1A1410",
+    color: "var(--accent-on-rust)",
     border: "none",
     borderRadius: 5,
     cursor: "pointer",
@@ -609,7 +609,7 @@ const styles = {
   branchTag: {
     fontSize: 10.5,
     background: "var(--accent-sage-dim)",
-    color: "#D7E5DC",
+    color: "var(--accent-on-sage)",
     padding: "2px 7px",
     borderRadius: 4,
   },

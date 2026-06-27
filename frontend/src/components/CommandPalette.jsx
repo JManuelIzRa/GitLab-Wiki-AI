@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 export function CommandPalette({ open, pages, actions, onSelectPage, onClose }) {
   const [query, setQuery] = useState("");
+  const trapRef = useFocusTrap(open);
 
   const close = () => { setQuery(""); onClose(); };
 
@@ -27,8 +29,8 @@ export function CommandPalette({ open, pages, actions, onSelectPage, onClose }) 
   if (!open) return null;
   return (
     <div className="modal-overlay command-palette-overlay" onClick={close}>
-      <div className="command-palette" role="dialog" aria-modal="true" aria-label="Comandos" onClick={(e) => e.stopPropagation()}>
-        <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar páginas y acciones…" />
+      <div ref={trapRef} className="command-palette" role="dialog" aria-modal="true" aria-label="Comandos" onClick={(e) => e.stopPropagation()}>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar páginas y acciones…" />
         <div className="command-results">
           {entries.map((entry) => (
             <button key={entry.id} onClick={() => { entry.run(); close(); }}>

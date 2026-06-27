@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api/client";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { languageFromPath } from "../utils/language";
 import { gitLabSourceUrl } from "../utils/gitlab";
 import { HighlightedCode } from "./HighlightedCode";
@@ -63,6 +64,7 @@ function ResultCard({ result, query, repository }) {
  * de código más relevantes, así que la respuesta es instantánea y no genera texto nuevo.
  */
 export function CodeSearch({ repositoryId, repository, ragAvailable, onClose }) {
+  const trapRef = useFocusTrap();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -88,7 +90,7 @@ export function CodeSearch({ repositoryId, repository, ragAvailable, onClose }) 
 
   return (
     <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <div ref={trapRef} style={styles.modal} role="dialog" aria-modal="true" aria-label="Buscar en el código" onClick={(e) => e.stopPropagation()}>
         <div style={styles.header}>
           <span style={styles.title}>buscar en el código</span>
           <button onClick={onClose} style={styles.closeBtn}>
@@ -210,7 +212,7 @@ const styles = {
     padding: "0 16px",
     fontSize: 12.5,
     fontWeight: 600,
-    color: "#1A1410",
+    color: "var(--accent-on-rust)",
     whiteSpace: "nowrap",
     cursor: "pointer",
   },
@@ -222,7 +224,7 @@ const styles = {
     borderRadius: 6,
     padding: "8px 12px",
     fontSize: 12,
-    color: "#E5A99A",
+    color: "var(--text-error)",
   },
   resultsArea: {
     flex: 1,
@@ -243,7 +245,7 @@ const styles = {
     border: "1px solid var(--border-subtle)",
     borderRadius: 6,
     overflow: "hidden",
-    background: "#1E1E1E",
+    background: "var(--code-bg)",
   },
   resultHeader: {
     display: "flex",
