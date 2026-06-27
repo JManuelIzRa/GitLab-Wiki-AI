@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { KeyboardShortcutsModal } from "./components/KeyboardShortcutsModal";
 import { RepositoryBrowser } from "./components/RepositoryBrowser";
 import { ConnectForm } from "./components/ConnectForm";
 import { GroupConnectForm } from "./components/GroupConnectForm";
@@ -75,7 +76,7 @@ const skeletonStyles = {
 function WikiLayout({
   repository, pages, activeSlug, activePage, pageLoading,
   onSelectPage, onReset, onReindex, onUpdatePage,
-  searchOpen, graphOpen, setSearchOpen, setGraphOpen,
+  searchOpen, graphOpen, shortcutsOpen, setSearchOpen, setGraphOpen, setShortcutsOpen,
   theme, onToggleTheme,
 }) {
   return (
@@ -119,6 +120,9 @@ function WikiLayout({
       )}
       {graphOpen && repository && (
         <DependencyGraphView repositoryId={repository.id} onClose={() => setGraphOpen(false)} />
+      )}
+      {shortcutsOpen && (
+        <KeyboardShortcutsModal onClose={() => setShortcutsOpen(false)} />
       )}
     </div>
   );
@@ -187,6 +191,7 @@ function App() {
   const [pageLoading, setPageLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // ---- Group state ----
   const [groups, setGroups] = useState([]);
@@ -258,12 +263,18 @@ function App() {
     }
   }, [repositories.length]);
 
-  // Keyboard navigation between wiki pages (Alt+← / Alt+→).
+  // Keyboard navigation between wiki pages (Alt+← / Alt+→) and shortcuts modal (?).
   useEffect(() => {
     if (view !== VIEW.WIKI || !pages.length) return;
 
     const handler = (e) => {
       if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+
+      if (e.key === "?" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+        return;
+      }
 
       if (e.altKey && e.key === "ArrowLeft") {
         e.preventDefault();
@@ -316,7 +327,8 @@ function App() {
   };
 
   const handleReindexRepository = (repo) => {
-    offlineCache.clearRepo(repo.id);
+    // Don't clear the cache here — only clear it when the new index completes successfully.
+    // Clearing early means a failed re-index leaves the user with no cached content.
     setReindexPrefill(repo);
     setSubmitError("");
     setView(VIEW.CONNECT);
@@ -339,10 +351,13 @@ function App() {
     }
   };
 
-  // Transition to WIKI view automatically when the indexing job completes.
+  // Transition to WIKI view when indexing completes. Clear stale cache first so the
+  // user never reads outdated offline content after a successful re-index.
   useEffect(() => {
     if (job?.status === "done" && job.repository_id) {
-      api.getWikiStructure(job.repository_id).then((structure) => {
+      offlineCache.clearRepo(job.repository_id).then(() =>
+        api.getWikiStructure(job.repository_id)
+      ).then((structure) => {
         offlineCache.setStructure(job.repository_id, structure);
         setRepository(structure.repository);
         setPages(structure.pages);
@@ -565,8 +580,10 @@ function App() {
       onUpdatePage={handleUpdatePage}
       searchOpen={searchOpen}
       graphOpen={graphOpen}
+      shortcutsOpen={shortcutsOpen}
       setSearchOpen={setSearchOpen}
       setGraphOpen={setGraphOpen}
+      setShortcutsOpen={setShortcutsOpen}
       theme={theme}
       onToggleTheme={toggleTheme}
     />

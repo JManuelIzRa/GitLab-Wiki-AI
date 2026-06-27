@@ -81,6 +81,8 @@ class RepositorySummary(BaseModel):
     # True when a per-repo PAT has been stored for webhook re-indexing (token is never returned)
     gitlab_token_set: bool = False
     system_prompt: str = ""
+    prompt_overrides: dict | None = None
+    wiki_language: str = ""
     updated_at: datetime
 
     @classmethod
@@ -100,6 +102,8 @@ class RepositorySummary(BaseModel):
             webhook_secret=repo.webhook_secret,
             gitlab_token_set=bool(repo.gitlab_token),
             system_prompt=repo.system_prompt or "",
+            prompt_overrides=repo.prompt_overrides,
+            wiki_language=repo.wiki_language or "",
             updated_at=repo.updated_at,
         )
 
@@ -183,6 +187,17 @@ class RepoGitLabTokenUpdate(BaseModel):
 class RepoSystemPromptUpdate(BaseModel):
     """Custom LLM system prompt override for this repo's wiki generation. Empty = use default."""
     system_prompt: str = Field(default="", max_length=10_000)
+
+
+class RepoPromptOverridesUpdate(BaseModel):
+    """JSON dict overriding specific prompt template keys (overview, architecture, module, setup).
+    Pass null to clear all overrides and restore language defaults."""
+    prompt_overrides: dict | None = None
+
+
+class RepoWikiLanguageUpdate(BaseModel):
+    """ISO language code for this repo's wiki generation. Empty = use global WIKI_LANGUAGE setting."""
+    wiki_language: str = Field(default="", max_length=8)
 
 
 class BranchListRequest(BaseModel):

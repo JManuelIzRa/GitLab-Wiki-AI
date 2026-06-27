@@ -157,6 +157,20 @@ export const api = {
       body: JSON.stringify({ system_prompt: systemPrompt }),
     }),
 
+  /** Override specific prompt template keys (overview/architecture/module/setup) for this repo. */
+  setPromptOverrides: (repoId, promptOverrides) =>
+    request(`/api/repositories/${repoId}/prompt-overrides`, {
+      method: "PATCH",
+      body: JSON.stringify({ prompt_overrides: promptOverrides }),
+    }),
+
+  /** Set the wiki generation language for this repo (ISO code, e.g. "en", "fr"). Empty = global default. */
+  setWikiLanguage: (repoId, wikiLanguage) =>
+    request(`/api/repositories/${repoId}/wiki-language`, {
+      method: "PATCH",
+      body: JSON.stringify({ wiki_language: wikiLanguage }),
+    }),
+
   /** Fetch available branches for a GitLab project (proxied through the backend). */
   listBranches: (gitlabUrl, projectPath, privateToken) =>
     request("/api/gitlab/branches", {

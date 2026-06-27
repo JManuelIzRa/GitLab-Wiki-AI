@@ -5,7 +5,6 @@ import asyncio
 import hmac
 import json
 import logging
-from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
@@ -23,25 +22,20 @@ from app.models.db_models import (
 from app.models.schemas import (
     BranchListRequest, DependencyGraphResponse, GitLabWebhookPayload,
     IndexJobResponse, IndexRepositoryRequest, PushToGitLabWikiRequest,
-    PushToGitLabWikiResponse, RepoGitLabTokenUpdate, RepoSystemPromptUpdate,
-    RepoWebhookSecretUpdate, RepositorySummary, WikiPageDetail,
+    PushToGitLabWikiResponse, RepoGitLabTokenUpdate, RepoPromptOverridesUpdate,
+    RepoSystemPromptUpdate, RepoWebhookSecretUpdate, RepoWikiLanguageUpdate,
+    RepositorySummary, WikiPageDetail,
     WikiPageUpdate, WikiRevisionResponse, WikiStructureResponse, WikiTextSearchResult,
 )
 from app.services.gitlab_client import GitLabAuthError, GitLabClient, GitLabNotFoundError
 from app.services.indexer import run_index_job
+from app.services.lock_manager import repo_index_lock
 from app.services.vector_store import VectorStore
 from app.services.wiki_exporter import export_wiki_to_markdown
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Per-repo asyncio lock to prevent concurrent indexing of the same repository.
-_index_locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
-
-
-def _repo_lock(gitlab_url: str, project_path: str) -> asyncio.Lock:
-    return _index_locks[(gitlab_url.rstrip("/"), project_path.strip("/"))]
 
 
 def _extract_excerpt(content: str, query: str, context: int = 120) -> str:
@@ -71,8 +65,8 @@ async def index_repository(
     session: AsyncSession = Depends(get_session),
 ):
     """Creates (or reuses) a Repository record and launches an IndexJob in background."""
-    lock = _repo_lock(payload.gitlab_url, payload.project_path)
-    async with lock:
+    repo_key = f"{payload.gitlab_url.rstrip('/')}/{payload.project_path.strip('/')}"
+    async with repo_index_lock(repo_key):
         existing = (
             await session.execute(
                 select(Repository).where(
@@ -470,6 +464,36 @@ async def set_repo_system_prompt(
     repo.system_prompt = payload.system_prompt
     await session.commit()
     return {"ok": True, "system_prompt_set": bool(payload.system_prompt)}
+
+
+@router.patch("/repositories/{repo_id}/prompt-overrides")
+async def set_repo_prompt_overrides(
+    repo_id: int,
+    payload: RepoPromptOverridesUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Override individual prompt template keys (overview/architecture/module/setup) per repo."""
+    repo = await session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+    repo.prompt_overrides = payload.prompt_overrides
+    await session.commit()
+    return {"ok": True, "overrides_set": bool(payload.prompt_overrides)}
+
+
+@router.patch("/repositories/{repo_id}/wiki-language")
+async def set_repo_wiki_language(
+    repo_id: int,
+    payload: RepoWikiLanguageUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    """Set per-repo wiki generation language (ISO code). Empty = use global WIKI_LANGUAGE."""
+    repo = await session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+    repo.wiki_language = payload.wiki_language
+    await session.commit()
+    return {"ok": True, "wiki_language": repo.wiki_language or "(global default)"}
 
 
 # ---------------------------------------------------------------------------

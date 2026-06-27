@@ -70,9 +70,17 @@ class Settings(BaseSettings):
     # Token que GitLab envía en la cabecera X-Gitlab-Token para autenticar el webhook.
     # Deja vacío para deshabilitar la validación (solo recomendable en desarrollo local).
     gitlab_webhook_secret: str = ""
+    # Set to true to refuse startup when GITLAB_WEBHOOK_SECRET is not configured.
+    # Recommended for production deployments where the webhook endpoint is public-facing.
+    gitlab_webhook_secret_required: bool = False
     # PAT usado para re-indexar repos disparados por webhook. Debe tener scope read_api + read_repository.
     # Si está vacío, los webhooks de push solo marcan el repo como desactualizado pero no re-indexan.
     gitlab_default_token: str = ""
+
+    # --- Staleness-based auto re-indexing ---
+    # Hours after the last successful index after which a repo is considered stale and
+    # automatically re-indexed (requires per-repo or global gitlab token). 0 = disabled.
+    reindex_staleness_hours: int = 0
 
     # --- Rate limiting ---
     rate_limit_index: str = "5/minute"   # máx. jobs de indexado nuevos por IP

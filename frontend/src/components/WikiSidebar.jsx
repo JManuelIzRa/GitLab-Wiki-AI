@@ -10,17 +10,34 @@ function groupPages(pages) {
 function RepoSettingsPanel({ repository, onClose }) {
   const [systemPrompt, setSystemPrompt] = useState(repository.system_prompt || "");
   const [gitlabToken, setGitlabToken] = useState("");
+  const [wikiLanguage, setWikiLanguage] = useState(repository.wiki_language || "");
+  const [promptOverridesRaw, setPromptOverridesRaw] = useState(
+    repository.prompt_overrides ? JSON.stringify(repository.prompt_overrides, null, 2) : ""
+  );
+  const [promptOverridesError, setPromptOverridesError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
   const handleSave = async () => {
+    setPromptOverridesError("");
+    let parsedOverrides = null;
+    if (promptOverridesRaw.trim()) {
+      try {
+        parsedOverrides = JSON.parse(promptOverridesRaw);
+      } catch {
+        setPromptOverridesError("JSON inválido en los overrides de prompt.");
+        return;
+      }
+    }
     setSaving(true);
     setError("");
     try {
       await Promise.all([
         api.setSystemPrompt(repository.id, systemPrompt),
         gitlabToken ? api.setGitLabToken(repository.id, gitlabToken) : Promise.resolve(),
+        api.setWikiLanguage(repository.id, wikiLanguage),
+        api.setPromptOverrides(repository.id, parsedOverrides),
       ]);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -65,6 +82,36 @@ function RepoSettingsPanel({ repository, onClose }) {
             style={settingsStyles.input}
             placeholder={repository.gitlab_token_set ? "(dejar vacío para no cambiar)" : "glpat-xxxxxxxxxxxxxxxxxxxx"}
           />
+        </label>
+
+        <label style={settingsStyles.fieldLabel}>
+          <span style={settingsStyles.fieldName}>Idioma del wiki (por repo)</span>
+          <span style={settingsStyles.fieldHint}>
+            Código ISO del idioma para generar el wiki de este repo (ej. "en", "fr", "de"). Vacío = usar el idioma global del servidor.
+          </span>
+          <input
+            type="text"
+            value={wikiLanguage}
+            onChange={(e) => setWikiLanguage(e.target.value)}
+            style={settingsStyles.input}
+            placeholder="es, en, fr, de, pt… (vacío = global)"
+            maxLength={8}
+          />
+        </label>
+
+        <label style={settingsStyles.fieldLabel}>
+          <span style={settingsStyles.fieldName}>Overrides de plantillas de prompt</span>
+          <span style={settingsStyles.fieldHint}>
+            JSON que sobreescribe claves específicas del prompt (overview, architecture, module, setup). Vacío = usar las plantillas del idioma configurado.
+          </span>
+          <textarea
+            value={promptOverridesRaw}
+            onChange={(e) => { setPromptOverridesRaw(e.target.value); setPromptOverridesError(""); }}
+            style={{ ...settingsStyles.textarea, fontFamily: "var(--font-mono)", fontSize: 11 }}
+            placeholder={'{\n  "overview": "Generate a concise overview…",\n  "setup": "Write setup steps…"\n}'}
+            rows={5}
+          />
+          {promptOverridesError && <div style={{ ...settingsStyles.error, marginTop: 4 }}>{promptOverridesError}</div>}
         </label>
 
         {error && <div style={settingsStyles.error}>{error}</div>}
@@ -335,12 +382,19 @@ export function WikiSidebar({
           ⊞ grafo de dependencias
         </button>
         <div style={styles.exportRow}>
-          <a href={exportUrl} download style={styles.exportBtn}>
+          <a href={exportUrl} download style={styles.exportBtn} title="Descargar como Markdown">
             ↓ .md
           </a>
-          <a href={htmlExportUrl} download style={styles.exportBtn}>
+          <a href={htmlExportUrl} download style={styles.exportBtn} title="Descargar como HTML">
             ↓ .html
           </a>
+          <button
+            style={styles.exportBtn}
+            title="Imprimir / guardar como PDF"
+            onClick={() => window.open(htmlExportUrl, "_blank")?.print?.()}
+          >
+            ⎙ pdf
+          </button>
         </div>
       </div>
 
@@ -454,7 +508,7 @@ export function WikiSidebar({
       </nav>
 
       <div style={styles.keyHint}>
-        <span>/</span> buscar · <span>Alt+← / Alt+→</span> navegar
+        <span>/</span> buscar · <span>Alt+← / Alt+→</span> navegar · <span>?</span> atajos
       </div>
     </aside>
     {showSettings && (

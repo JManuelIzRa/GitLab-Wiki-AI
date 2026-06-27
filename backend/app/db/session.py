@@ -118,6 +118,19 @@ _MIGRATIONS = [
         "  content=wiki_pages, content_rowid=id"
         ")"
     ),
+    # DB-level advisory lock table (replaces in-process asyncio.Lock dict)
+    (
+        "CREATE TABLE IF NOT EXISTS index_locks ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  repo_key TEXT NOT NULL UNIQUE,"
+        "  locked_at DATETIME NOT NULL,"
+        "  expires_at DATETIME NOT NULL"
+        ")"
+    ),
+    "CREATE INDEX IF NOT EXISTS ix_index_locks_expires ON index_locks (expires_at)",
+    # Per-repo prompt template overrides and language
+    "ALTER TABLE repositories ADD COLUMN prompt_overrides JSON DEFAULT NULL",
+    "ALTER TABLE repositories ADD COLUMN wiki_language TEXT NOT NULL DEFAULT ''",
 ]
 
 

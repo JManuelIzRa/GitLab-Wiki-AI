@@ -9,8 +9,10 @@ Variables de entorno clave (ver .env.example):
     EMBEDDING_URL       URL del servicio de embeddings
     QDRANT_HOST         Host del servidor Qdrant
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 
 import httpx
 from fastapi import FastAPI
@@ -24,7 +26,7 @@ from app.api.routes import router
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.db.session import AsyncSessionLocal, init_db
-from app.models.db_models import Repository
+from app.models.db_models import IndexJob, JobStatus, Repository
 from app.services.embedding_client import get_embedding_client
 from app.services.vector_store import VectorStore
 from app.services.wiki_generator import WikiGenerator
@@ -64,10 +66,59 @@ async def _warn_unreachable_services() -> None:
                 )
 
 
+async def _staleness_reindex_loop() -> None:
+    """Hourly background task: re-index repos whose content is stale (no webhook configured).
+
+    Only runs when REINDEX_STALENESS_HOURS > 0 and a token is available per-repo or globally.
+    """
+    while True:
+        await asyncio.sleep(3600)
+        if not settings.reindex_staleness_hours:
+            continue
+        threshold = datetime.now(timezone.utc) - timedelta(hours=settings.reindex_staleness_hours)
+        try:
+            async with AsyncSessionLocal() as session:
+                stale = (await session.execute(
+                    select(Repository).where(Repository.updated_at < threshold)
+                )).scalars().all()
+                for repo in stale:
+                    token = repo.gitlab_token or settings.gitlab_default_token
+                    if not token:
+                        continue
+                    active = (await session.execute(
+                        select(IndexJob).where(
+                            IndexJob.repository_id == repo.id,
+                            IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
+                        ).limit(1)
+                    )).scalar()
+                    if active:
+                        continue
+                    job = IndexJob(
+                        repository_id=repo.id, status=JobStatus.PENDING.value, progress=0,
+                        current_step="Re-indexado automático por contenido desactualizado...",
+                    )
+                    session.add(job)
+                    await session.commit()
+                    await session.refresh(job)
+                    from app.services.indexer import run_index_job
+                    asyncio.create_task(
+                        run_index_job(job.id, repo.gitlab_url, repo.project_path, token, None, False)
+                    )
+                    logger.info("Staleness re-index queued for repo %s (%s)", repo.id, repo.project_path)
+        except Exception:
+            logger.exception("Staleness re-index loop encountered an error; will retry in 1h.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await _warn_unreachable_services()
+
+    if settings.gitlab_webhook_secret_required and not settings.gitlab_webhook_secret:
+        raise RuntimeError(
+            "GITLAB_WEBHOOK_SECRET_REQUIRED=true but GITLAB_WEBHOOK_SECRET is not set. "
+            "Set the secret or disable the requirement."
+        )
 
     if not settings.gitlab_webhook_secret:
         logger.warning(
@@ -82,7 +133,10 @@ async def lifespan(app: FastAPI):
     await VectorStore.cleanup_orphan_collections(known_ids)
     get_embedding_client()
     app.state.wiki_generator = WikiGenerator()
+
+    staleness_task = asyncio.create_task(_staleness_reindex_loop())
     yield
+    staleness_task.cancel()
     await app.state.wiki_generator.close()
 
 

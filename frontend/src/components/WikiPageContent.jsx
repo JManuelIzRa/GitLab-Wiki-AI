@@ -3,9 +3,49 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Check, Download, History, Pencil, RotateCcw, Upload, X, ZoomIn } from "lucide-react";
+import { Check, Download, History, Pencil, RotateCcw, Upload, X } from "lucide-react";
 import mermaid, { MERMAID_DARK_VARS, MERMAID_LIGHT_VARS } from "../utils/mermaid";
 import { api } from "../api/client";
+
+// ---------------------------------------------------------------------------
+// Simple line-level diff (no external dep)
+// ---------------------------------------------------------------------------
+
+function computeLineDiff(aText, bText) {
+  const aLines = aText.split("\n");
+  const bLines = bText.split("\n");
+  const result = [];
+  let ai = 0;
+  let bi = 0;
+  // Build a simple LCS-based diff
+  const m = aLines.length;
+  const n = bLines.length;
+  // dp[i][j] = LCS length of aLines[0..i) and bLines[0..j)
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = aLines[i - 1] === bLines[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  // Backtrack
+  let i = m; let j = n;
+  const ops = [];
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && aLines[i - 1] === bLines[j - 1]) {
+      ops.push({ type: "eq", line: aLines[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      ops.push({ type: "add", line: bLines[j - 1] });
+      j--;
+    } else {
+      ops.push({ type: "del", line: aLines[i - 1] });
+      i--;
+    }
+  }
+  return ops.reverse();
+}
 
 // ---------------------------------------------------------------------------
 // Toast
@@ -238,14 +278,55 @@ function CodeBlock({ lang, children }) {
 }
 
 // ---------------------------------------------------------------------------
+// Diff view
+// ---------------------------------------------------------------------------
+
+function DiffView({ currentContent, revisionContent, onClose }) {
+  const ops = computeLineDiff(revisionContent, currentContent);
+  const added = ops.filter((o) => o.type === "add").length;
+  const deleted = ops.filter((o) => o.type === "del").length;
+
+  return (
+    <div style={styles.diffOverlay}>
+      <div style={styles.diffPanel}>
+        <div style={styles.revisionHeader}>
+          <span style={styles.revisionTitle}>
+            Diferencias · <span style={{ color: "var(--accent-sage)" }}>+{added}</span>{" "}
+            <span style={{ color: "var(--accent-red)" }}>-{deleted}</span>
+          </span>
+          <button onClick={onClose} style={styles.closeBtn}><X size={14} /></button>
+        </div>
+        <div style={styles.diffBody}>
+          {ops.map((op, idx) => (
+            <div
+              key={idx}
+              style={{
+                ...styles.diffLine,
+                ...(op.type === "add" ? styles.diffAdd : op.type === "del" ? styles.diffDel : {}),
+              }}
+            >
+              <span style={styles.diffSymbol}>
+                {op.type === "add" ? "+" : op.type === "del" ? "−" : " "}
+              </span>
+              <span style={styles.diffText}>{op.line || " "}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Revision panel
 // ---------------------------------------------------------------------------
 
-function RevisionPanel({ repoId, slug, onRestore, onClose }) {
+function RevisionPanel({ repoId, slug, currentContent, onRestore, onClose }) {
   const [revisions, setRevisions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [restoring, setRestoring] = useState(null);
+  const [diffRev, setDiffRev] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -268,6 +349,16 @@ function RevisionPanel({ repoId, slug, onRestore, onClose }) {
       setRestoring(null);
     }
   };
+
+  if (diffRev) {
+    return (
+      <DiffView
+        currentContent={currentContent}
+        revisionContent={diffRev.content_preview}
+        onClose={() => setDiffRev(null)}
+      />
+    );
+  }
 
   return (
     <div style={styles.revisionOverlay}>
@@ -293,14 +384,23 @@ function RevisionPanel({ repoId, slug, onRestore, onClose }) {
                 )}
               </div>
               <p style={styles.revisionPreview}>{rev.content_preview}…</p>
-              <button
-                style={styles.restoreBtn}
-                disabled={restoring === rev.id}
-                onClick={() => handleRestore(rev)}
-              >
-                <RotateCcw size={12} />
-                {restoring === rev.id ? "Restaurando…" : "Restaurar"}
-              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  style={styles.diffBtn}
+                  onClick={() => setDiffRev(rev)}
+                  title="Ver diferencias con la versión actual"
+                >
+                  diff
+                </button>
+                <button
+                  style={styles.restoreBtn}
+                  disabled={restoring === rev.id}
+                  onClick={() => handleRestore(rev)}
+                >
+                  <RotateCcw size={12} />
+                  {restoring === rev.id ? "Restaurando…" : "Restaurar"}
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -540,6 +640,7 @@ export function WikiPageContent({ page, repositoryId, onUpdatePage }) {
         <RevisionPanel
           repoId={repositoryId}
           slug={page.slug}
+          currentContent={page.content_markdown}
           onRestore={handleRestored}
           onClose={() => setShowRevisions(false)}
         />
@@ -1048,5 +1149,72 @@ const styles = {
     padding: "8px 10px",
     borderRadius: 4,
     marginBottom: 8,
+  },
+  diffBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 11,
+    fontFamily: "var(--font-mono)",
+    padding: "3px 10px",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    cursor: "pointer",
+    color: "var(--accent-rust)",
+  },
+  diffOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.5)",
+    zIndex: 250,
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "flex-end",
+  },
+  diffPanel: {
+    width: 520,
+    maxWidth: "90vw",
+    height: "100vh",
+    overflowY: "auto",
+    background: "var(--bg-elevated)",
+    borderLeft: "1px solid var(--border-subtle)",
+    padding: "24px 0",
+    display: "flex",
+    flexDirection: "column",
+    gap: 0,
+  },
+  diffBody: {
+    fontFamily: "var(--font-mono)",
+    fontSize: 11.5,
+    overflowX: "auto",
+    flex: 1,
+  },
+  diffLine: {
+    display: "flex",
+    alignItems: "flex-start",
+    padding: "1px 12px",
+    lineHeight: 1.6,
+    whiteSpace: "pre",
+  },
+  diffAdd: {
+    background: "rgba(80,160,80,0.15)",
+    borderLeft: "2px solid rgba(80,160,80,0.5)",
+    color: "var(--accent-sage)",
+  },
+  diffDel: {
+    background: "rgba(192,89,74,0.12)",
+    borderLeft: "2px solid rgba(192,89,74,0.4)",
+    color: "var(--accent-red)",
+  },
+  diffSymbol: {
+    width: 16,
+    flexShrink: 0,
+    userSelect: "none",
+    opacity: 0.7,
+  },
+  diffText: {
+    flex: 1,
+    overflowX: "visible",
   },
 };
