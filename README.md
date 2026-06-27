@@ -1,139 +1,185 @@
 # DeepWiki for GitLab
 
-Réplica funcional de [DeepWiki](https://deepwiki.com) para repositorios de **GitLab**
-(self-hosted o gitlab.com). Indexa un proyecto, analiza su estructura real (lenguajes,
-dependencias, módulos) y genera un wiki navegable con páginas escritas por IA a partir
-del código fuente real — overview, arquitectura con diagramas, una página por módulo
-principal, y una guía de instalación/ejecución.
+> [Español](#español) · [English](#english)
+
+---
+
+## English
+
+A functional clone of [DeepWiki](https://deepwiki.com) for **GitLab** repositories (self-hosted or gitlab.com). It indexes a project, analyses its real structure (languages, dependencies, modules) and generates a navigable wiki with AI-written pages based on the actual source code — overview, architecture with diagrams, one page per main module, and an installation/run guide.
 
 ```
-backend/    API en FastAPI: cliente GitLab, análisis estático, generación con IA, persistencia
-frontend/   SPA en React + Vite: formulario de conexión, progreso de indexado, lector del wiki
+backend/    FastAPI API: GitLab client, static analysis, AI generation, persistence
+frontend/   React + Vite SPA: connection form, indexing progress, wiki reader
 ```
 
-## Cómo funciona
+### How it works
 
-1. **Conectas** un proyecto GitLab dando la URL de la instancia, la ruta del proyecto
-   (`grupo/proyecto`) y un Personal Access Token.
-2. El backend **clona la metadata y el árbol de archivos** vía la API REST v4 de GitLab
-   (no hace `git clone` real, lee archivos individuales vía API — funciona igual en
-   self-hosted que en gitlab.com).
-3. Un **analizador estático** (sin IA) detecta lenguajes, gestores de dependencias
-   (package.json, requirements.txt, pom.xml, go.mod, etc.), agrupa archivos en módulos
-   por carpeta y detecta puntos de entrada.
-4. Un **LLM** (cualquier servidor OpenAI-compatible: llama.cpp, vLLM, LM Studio con un
-   modelo local, o la API de OpenAI/Anthropic vía proxy) recibe ese contexto estructurado
-   más el contenido real de los archivos relevantes y genera cada página del wiki en
-   Markdown, incluyendo diagramas Mermaid cuando aplica.
-5. Todo se persiste en SQLite. El **frontend recibe el progreso del job en tiempo real
-   vía Server-Sent Events** y, al terminar, muestra el wiki con sidebar de navegación,
-   render de Markdown/Mermaid/código, y un panel de preguntas libres sobre el contenido
-   ya generado.
+1. **Connect** a GitLab project by providing the instance URL, project path (`group/project`) and a Personal Access Token.
+2. The backend **fetches metadata and the file tree** via the GitLab REST API v4 (no real `git clone` — files are read individually via the API, works equally against self-hosted and gitlab.com).
+3. A **static analyser** (no AI) detects languages, dependency managers (package.json, requirements.txt, pom.xml, go.mod, …), groups files into modules by folder and detects entry points.
+4. An **LLM** (any OpenAI-compatible server: llama.cpp, vLLM, LM Studio with a local model, or the OpenAI/Anthropic API via proxy) receives that structured context plus the real content of relevant files and generates each wiki page in Markdown, including Mermaid diagrams where applicable.
+5. Everything is persisted in SQLite. The **frontend receives job progress in real time via Server-Sent Events** and, when done, shows the wiki with sidebar navigation, Markdown/Mermaid/code rendering, multi-turn chat panel, and code search.
 
-## Requisitos
+### Requirements
 
 - Python 3.11+
 - Node.js 18+
-- Un servidor LLM compatible con la API de OpenAI para generación de wiki y chat RAG
-  (ver opciones en la sección de configuración más abajo)
-- Un Personal Access Token de GitLab con scopes `read_api` y `read_repository`
+- An OpenAI-compatible LLM server for wiki generation and RAG chat (see configuration below)
+- A GitLab Personal Access Token with `read_api` and `read_repository` scopes
 
-## Backend
+### Quick start — Docker Compose (recommended)
+
+The fastest way to run the whole stack (backend + frontend + Qdrant):
 
 ```bash
-cd backend
-pip install -r requirements.txt
+cp backend/.env.example backend/.env
+# Edit backend/.env — set OPENAI_URL, EMBEDDING_URL, and OPENAI_API_KEY at minimum
 
-cp .env.example .env
-# Edita .env con la URL y modelo de tu servidor LLM (ver tabla más abajo)
+docker compose up --build
+```
+
+Open **http://localhost:5173**. The LLM and embedding services are external — configure their URLs in `.env`.
+
+### Manual setup
+
+**Backend:**
+```bash
+cd backend
+pip install -r requirements.txt    # or: uv sync
+
+cp .env.example .env               # edit with your LLM/embedding URLs
 
 uvicorn app.main:app --reload --port 8000
 ```
 
-La API queda en `http://localhost:8000`. Documentación interactiva automática en
-`http://localhost:8000/docs`.
+API at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
-### Variables de entorno (`backend/.env`)
+**Frontend:**
+```bash
+cd frontend
+npm install
+cp .env.example .env               # defaults to http://localhost:8000
+npm run dev
+```
 
-El backend usa un cliente **OpenAI-compatible**, así que puedes apuntar a un modelo local
-(llama.cpp, vLLM, LM Studio, Ollama con `--api openai`) o a cualquier API cloud que
-exponga el mismo contrato (OpenAI, Azure OpenAI, OpenRouter, etc.).
+App at `http://localhost:5173`.
 
-| Variable                          | Descripción                                                                 | Default                              |
-|------------------------------------|-----------------------------------------------------------------------------|---------------------------------------|
-| `OPENAI_URL`                      | URL base del servidor LLM (ej. `http://localhost:8000/` para llama.cpp)     | `http://192.168.0.100:8000/`          |
-| `OPENAI_CHAT_MODEL`               | Nombre del modelo a usar (tal como lo expone el servidor)                   | `qwen2.5-3b-instruct-q4_k_m.gguf`    |
-| `OPENAI_API_KEY`                  | API key (usar `not-needed` para servidores locales sin autenticación)        | `not-needed`                          |
-| `EMBEDDING_URL`                   | URL del servicio de embeddings compatible con la API de OpenAI               | `http://192.168.0.100:8080/embed`     |
-| `QDRANT_HOST` / `QDRANT_PORT`     | Host y puerto de Qdrant para búsqueda semántica                             | `192.168.0.100` / `6333`             |
-| `DATABASE_URL`                    | URL de conexión SQLAlchemy (SQLite por defecto)                             | `sqlite+aiosqlite:///./deepwiki.db`   |
-| `MAX_FILES_TO_INDEX`              | Tope de archivos a listar por repo (evita timeouts en monorepos)             | `400`                                 |
-| `MAX_CHARS_PER_AI_CALL`           | Presupuesto de contexto por llamada al LLM                                  | `12000`                               |
-| `MAX_CONCURRENT_MODULE_GENERATIONS` | LLM calls paralelas al generar páginas de módulo (subir a 6-10 con cloud) | `3`                                   |
+### Environment variables (`backend/.env`)
 
-**Ejemplo con OpenAI cloud:**
+The backend uses an **OpenAI-compatible client**, so you can point it at a local model (llama.cpp, vLLM, LM Studio, Ollama with `--api openai`) or any cloud API that exposes the same contract (OpenAI, Azure OpenAI, OpenRouter, etc.).
+
+| Variable | Description | Default |
+|---|---|---|
+| `OPENAI_URL` | Base URL of the LLM server | `http://localhost:8000/` |
+| `OPENAI_CHAT_MODEL` | Model name (as exposed by the server) | `qwen2.5-3b-instruct-q4_k_m.gguf` |
+| `OPENAI_API_KEY` | API key (`not-needed` for local servers) | `not-needed` |
+| `EMBEDDING_URL` | Embedding service URL (OpenAI-compatible) | `http://localhost:8080/embed` |
+| `QDRANT_HOST` / `QDRANT_PORT` | Qdrant host and port | `localhost` / `6333` |
+| `DATABASE_URL` | SQLAlchemy connection URL | `sqlite+aiosqlite:///./deepwiki.db` |
+| `MAX_FILES_TO_INDEX` | Max files to list per repo | `400` |
+| `MAX_CHARS_PER_AI_CALL` | Context budget per LLM call | `24000` |
+| `MAX_CONCURRENT_MODULE_GENERATIONS` | Parallel LLM calls for module pages | `3` |
+| `WIKI_LANGUAGE` | ISO language code for generated content | `es` |
+
+**OpenAI cloud example:**
 ```
 OPENAI_URL=https://api.openai.com/v1/
 OPENAI_CHAT_MODEL=gpt-4o-mini
 OPENAI_API_KEY=sk-...
 MAX_CHARS_PER_AI_CALL=60000
 MAX_CONCURRENT_MODULE_GENERATIONS=8
+WIKI_LANGUAGE=en
 ```
 
-## Frontend
+### Testing without a real GitLab instance
 
-```bash
-cd frontend
-npm install
-
-cp .env.example .env
-# Por defecto ya apunta a http://localhost:8000, ajusta si tu backend corre en otro host
-
-npm run dev
-```
-
-La app queda en `http://localhost:5173`.
-
-## Uso
-
-1. Abre el frontend, completa la URL de tu instancia GitLab (ej. `https://gitlab.com` o
-   `https://gitlab.tuempresa.com`), la ruta del proyecto (`grupo/proyecto`) y tu token.
-2. El indexado corre en segundo plano; verás el progreso etapa por etapa
-   (conectando → analizando → generando con IA → listo).
-3. Al terminar, navega el wiki generado desde el sidebar. Cada página muestra los
-   archivos fuente que la IA usó para escribirla.
-4. Usa el panel "¿preguntas sobre este repo?" en la esquina inferior derecha para
-   hacer preguntas libres; las respuestas se basan únicamente en el wiki ya generado.
-
-## Probar sin una instancia GitLab real
-
-El proyecto incluye un **mock de la API de GitLab** (`backend/tests/mock_gitlab_server.py`)
-que simula un proyecto pequeño en Node.js/Express. Es útil para probar el flujo completo
-sin necesitar credenciales reales:
+The project includes a **GitLab API mock** (`backend/tests/mock_gitlab_server.py`) that simulates a small Node.js/Express project. Useful for testing the full flow without real credentials:
 
 ```bash
 cd backend
-python3 tests/mock_gitlab_server.py
-# queda escuchando en http://127.0.0.1:9000
+python3 tests/mock_gitlab_server.py   # listens on http://127.0.0.1:9000
 ```
 
-Luego, en el formulario de conexión del frontend:
-- **URL de GitLab**: `http://127.0.0.1:9000`
-- **Ruta del proyecto**: `demo-group/demo-project`
+Then in the frontend connection form:
+- **GitLab URL**: `http://127.0.0.1:9000`
+- **Project path**: `demo-group/demo-project`
 - **Token**: `test-token-123`
 
-## Decisiones de diseño relevantes
+### Development
 
-- **Sin `git clone` real**: se lee el árbol y el contenido de archivos vía la API REST
-  de GitLab. Esto evita tener que gestionar disco, autenticación de Git y limpieza de
-  workspaces, y funciona igual de bien contra self-hosted que contra gitlab.com.
-- **Análisis estático separado de la IA**: la detección de lenguajes, dependencias y
-  módulos es pura heurística sin IA. Esto abarata el indexado (no se gastan tokens en
-  tareas mecánicas) y le da a los prompts de IA contexto ya estructurado en vez de
-  texto crudo.
-- **Presupuesto de contexto explícito**: cada llamada a IA recorta el contenido de
-  archivos a un límite de caracteres configurable, para que repos grandes no generen
-  prompts inmanejables ni costos descontrolados.
-- **Progreso real, no simulado**: el `IndexJob` se actualiza en cada etapa real del
-  pipeline (no hay una barra de progreso falsa); si el job falla, el mensaje de error
-  específico queda visible tanto en la API como en el frontend.
+```bash
+# Backend tests
+cd backend && python -m pytest tests/ -x -q
+
+# Frontend tests + lint
+cd frontend && npm test -- --run && npm run lint
+```
+
+---
+
+## Español
+
+Réplica funcional de [DeepWiki](https://deepwiki.com) para repositorios de **GitLab** (self-hosted o gitlab.com). Indexa un proyecto, analiza su estructura real (lenguajes, dependencias, módulos) y genera un wiki navegable con páginas escritas por IA a partir del código fuente real — overview, arquitectura con diagramas, una página por módulo principal, y una guía de instalación/ejecución.
+
+```
+backend/    API en FastAPI: cliente GitLab, análisis estático, generación con IA, persistencia
+frontend/   SPA en React + Vite: formulario de conexión, progreso de indexado, lector del wiki
+```
+
+### Cómo funciona
+
+1. **Conectas** un proyecto GitLab dando la URL de la instancia, la ruta del proyecto (`grupo/proyecto`) y un Personal Access Token.
+2. El backend **clona la metadata y el árbol de archivos** vía la API REST v4 de GitLab (no hace `git clone` real, lee archivos individuales vía API — funciona igual en self-hosted que en gitlab.com).
+3. Un **analizador estático** (sin IA) detecta lenguajes, gestores de dependencias (package.json, requirements.txt, pom.xml, go.mod, etc.), agrupa archivos en módulos por carpeta y detecta puntos de entrada.
+4. Un **LLM** (cualquier servidor OpenAI-compatible: llama.cpp, vLLM, LM Studio con un modelo local, o la API de OpenAI/Anthropic vía proxy) recibe ese contexto estructurado más el contenido real de los archivos relevantes y genera cada página del wiki en Markdown, incluyendo diagramas Mermaid cuando aplica.
+5. Todo se persiste en SQLite. El **frontend recibe el progreso del job en tiempo real vía Server-Sent Events** y, al terminar, muestra el wiki con sidebar de navegación, render de Markdown/Mermaid/código, chat multi-turno y búsqueda semántica sobre el código.
+
+### Requisitos
+
+- Python 3.11+
+- Node.js 18+
+- Un servidor LLM compatible con la API de OpenAI para generación de wiki y chat RAG
+- Un Personal Access Token de GitLab con scopes `read_api` y `read_repository`
+
+### Arranque rápido — Docker Compose (recomendado)
+
+```bash
+cp backend/.env.example backend/.env
+# Edita backend/.env — configura OPENAI_URL, EMBEDDING_URL y OPENAI_API_KEY
+
+docker compose up --build
+```
+
+Abre **http://localhost:5173**. El LLM y el servicio de embeddings son externos; configura sus URLs en `.env`.
+
+### Configuración manual
+
+Ver la sección en inglés para la tabla completa de variables de entorno — las mismas aplican aquí.
+
+### Variables de entorno clave
+
+| Variable | Descripción | Default |
+|---|---|---|
+| `OPENAI_URL` | URL base del servidor LLM | `http://localhost:8000/` |
+| `OPENAI_CHAT_MODEL` | Nombre del modelo | `qwen2.5-3b-instruct-q4_k_m.gguf` |
+| `EMBEDDING_URL` | URL del servicio de embeddings | `http://localhost:8080/embed` |
+| `WIKI_LANGUAGE` | Código ISO del idioma del wiki | `es` |
+
+### Probar sin GitLab real
+
+```bash
+cd backend
+python3 tests/mock_gitlab_server.py   # escucha en http://127.0.0.1:9000
+```
+
+En el formulario: URL `http://127.0.0.1:9000`, ruta `demo-group/demo-project`, token `test-token-123`.
+
+### Decisiones de diseño relevantes
+
+- **Sin `git clone` real**: se lee el árbol y el contenido de archivos vía la API REST de GitLab. Evita gestionar disco, autenticación de Git y limpieza de workspaces.
+- **Análisis estático separado de la IA**: la detección de lenguajes, dependencias y módulos es pura heurística sin IA. Abarata el indexado y le da a los prompts contexto ya estructurado.
+- **Presupuesto de contexto explícito**: cada llamada a IA recorta el contenido de archivos a un límite de caracteres configurable.
+- **Progreso real, no simulado**: el `IndexJob` se actualiza en cada etapa real del pipeline; si falla, el mensaje de error específico queda visible.
+- **Chat multi-turno**: el panel de preguntas mantiene el historial de la conversación y lo envía al LLM en cada turno, permitiendo preguntas de seguimiento.
+- **CORS sin credenciales**: la autenticación es por cabecera (token de GitLab), no por cookie, evitando el rechazo de navegadores con `Allow-Origin: *` + credenciales.

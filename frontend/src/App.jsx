@@ -263,6 +263,43 @@ function App() {
     }
   }, [repositories.length]);
 
+  // Reflect the active wiki page in the URL hash for deep-linking and browser history.
+  useEffect(() => {
+    if (view === VIEW.WIKI && activeSlug) {
+      const next = `#page=${activeSlug}`;
+      if (window.location.hash !== next) {
+        // pushState so back/forward navigate between pages
+        window.history.pushState(null, "", next);
+      }
+    } else if (view !== VIEW.WIKI && window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, [view, activeSlug]);
+
+  // Restore page from hash when entering the wiki (e.g. after browser forward)
+  useEffect(() => {
+    if (view !== VIEW.WIKI || !pages.length) return;
+    const match = window.location.hash.match(/^#page=(.+)$/);
+    if (match) {
+      const slug = match[1];
+      if (pages.find((p) => p.slug === slug)) setActiveSlug(slug);
+    }
+  }, [view, pages]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle browser back/forward while reading the wiki
+  useEffect(() => {
+    if (view !== VIEW.WIKI) return;
+    const handler = () => {
+      const match = window.location.hash.match(/^#page=(.+)$/);
+      if (match) {
+        const slug = match[1];
+        if (pages.find((p) => p.slug === slug)) setActiveSlug(slug);
+      }
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [view, pages]);
+
   // Keyboard navigation between wiki pages (Alt+← / Alt+→) and shortcuts modal (?).
   useEffect(() => {
     if (view !== VIEW.WIKI || !pages.length) return;

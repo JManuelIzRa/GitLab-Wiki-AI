@@ -69,19 +69,24 @@ export const api = {
       body: JSON.stringify({ content_markdown: contentMarkdown }),
     }),
 
-  askQuestion: (repoId, question) =>
-    request(`/api/repositories/${repoId}/chat`, { method: "POST", body: JSON.stringify({ question }) }),
+  askQuestion: (repoId, question, history = []) =>
+    request(`/api/repositories/${repoId}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ question, history }),
+    }),
 
   /**
    * Async generator that yields parsed SSE events from the streaming chat endpoint.
    * Yields: { token: string } for answer tokens, { sources: CodeSource[] } for source metadata.
+   * Accepts an optional AbortSignal to stop mid-stream (yields AbortError on cancel).
    * Throws ApiError on HTTP error or stream-level error event.
    */
-  streamAskQuestion: async function* (repoId, question) {
+  streamAskQuestion: async function* (repoId, question, history = [], signal = undefined) {
     const res = await fetch(`${API_BASE}/api/repositories/${repoId}/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, history }),
+      signal,
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -92,38 +97,42 @@ export const api = {
     let buffer = "";
     let currentEvent = "";
     let currentData = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          currentEvent = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          currentData += (currentData ? "\n" : "") + line.slice(6);
-        } else if (line === "") {
-          if (currentData) {
-            try {
-              const parsed = JSON.parse(currentData);
-              if (currentEvent === "sources") {
-                yield { sources: parsed };
-              } else if (currentEvent === "done") {
-                return;
-              } else if (currentEvent === "error") {
-                throw new ApiError(parsed.message || "Stream error", 500);
-              } else {
-                yield parsed;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            currentData += (currentData ? "\n" : "") + line.slice(6);
+          } else if (line === "") {
+            if (currentData) {
+              try {
+                const parsed = JSON.parse(currentData);
+                if (currentEvent === "sources") {
+                  yield { sources: parsed };
+                } else if (currentEvent === "done") {
+                  return;
+                } else if (currentEvent === "error") {
+                  throw new ApiError(parsed.message || "Stream error", 500);
+                } else {
+                  yield parsed;
+                }
+              } catch (e) {
+                if (e instanceof ApiError) throw e;
               }
-            } catch (e) {
-              if (e instanceof ApiError) throw e;
             }
+            currentEvent = "";
+            currentData = "";
           }
-          currentEvent = "";
-          currentData = "";
         }
       }
+    } finally {
+      reader.cancel().catch(() => {});
     }
   },
 

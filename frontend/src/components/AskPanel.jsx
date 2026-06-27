@@ -1,11 +1,30 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { api } from "../api/client";
 import { languageFromPath } from "../utils/language";
 
-/** Un fragmento de código fuente usado como evidencia de una respuesta, colapsado por defecto. */
+const MAX_HISTORY_TURNS = 10;
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+  return (
+    <button onClick={handleCopy} style={styles.copyBtn} title="Copiar respuesta">
+      {copied ? "✓" : "⎘"}
+    </button>
+  );
+}
+
 function SourceExtract({ source }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -45,6 +64,8 @@ export function AskPanel({ repositoryId, ragAvailable }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef(null);
+  const abortRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -52,10 +73,25 @@ export function AskPanel({ repositoryId, ragAvailable }) {
     }
   }, [messages, loading]);
 
+  // Focus input when panel opens
+  useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+  }, [open]);
+
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
   const handleAsk = async (e) => {
     e.preventDefault();
     const q = question.trim();
     if (!q || loading) return;
+
+    // Build history from the last MAX_HISTORY_TURNS user/assistant exchanges
+    const history = messages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .slice(-MAX_HISTORY_TURNS * 2)
+      .map((m) => ({ role: m.role, content: m.text }));
 
     setQuestion("");
     setLoading(true);
@@ -65,8 +101,12 @@ export function AskPanel({ repositoryId, ragAvailable }) {
       { role: "assistant", text: "", sources: [], streaming: true },
     ]);
 
+    abortRef.current = new AbortController();
+
     try {
-      for await (const event of api.streamAskQuestion(repositoryId, q)) {
+      for await (const event of api.streamAskQuestion(
+        repositoryId, q, history, abortRef.current.signal
+      )) {
         if (event.token !== undefined) {
           setMessages((prev) => {
             const copy = [...prev];
@@ -88,6 +128,17 @@ export function AskPanel({ repositoryId, ragAvailable }) {
         }
       }
     } catch (err) {
+      if (err.name === "AbortError") {
+        // User stopped streaming — finalise the partial answer cleanly
+        setMessages((prev) => {
+          const copy = [...prev];
+          const last = copy[copy.length - 1];
+          if (last?.streaming) copy[copy.length - 1] = { ...last, streaming: false };
+          return copy;
+        });
+        setLoading(false);
+        return;
+      }
       setMessages((prev) => {
         const copy = [...prev];
         if (copy[copy.length - 1]?.streaming) {
@@ -110,6 +161,8 @@ export function AskPanel({ repositoryId, ragAvailable }) {
     }
   };
 
+  const handleClear = () => setMessages([]);
+
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} style={styles.fab}>
@@ -118,13 +171,22 @@ export function AskPanel({ repositoryId, ragAvailable }) {
     );
   }
 
+  const streamingMsg = messages[messages.length - 1]?.streaming ? messages[messages.length - 1] : null;
+
   return (
     <div style={styles.panel}>
       <div style={styles.panelHeader}>
         <span style={styles.panelTitle}>preguntar al repo</span>
-        <button onClick={() => setOpen(false)} style={styles.closeBtn}>
-          ✕
-        </button>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {messages.length > 0 && !loading && (
+            <button onClick={handleClear} style={styles.clearBtn} title="Limpiar conversación">
+              limpiar
+            </button>
+          )}
+          <button onClick={() => setOpen(false)} style={styles.closeBtn}>
+            ✕
+          </button>
+        </div>
       </div>
 
       {!ragAvailable && (
@@ -150,9 +212,13 @@ export function AskPanel({ repositoryId, ragAvailable }) {
                 alignSelf: m.role === "user" ? "flex-end" : "flex-start",
                 background: m.role === "user" ? "var(--accent-rust-dim)" : "var(--bg-elevated-2)",
                 color: m.role === "error" ? "var(--accent-red)" : "var(--text-primary)",
+                position: "relative",
               }}
             >
               {m.role === "assistant" ? <ReactMarkdown>{m.text}</ReactMarkdown> : m.text}
+              {m.role === "assistant" && !m.streaming && m.text && (
+                <CopyButton text={m.text} />
+              )}
             </div>
 
             {m.role === "assistant" && m.sources?.length > 0 && (
@@ -167,21 +233,29 @@ export function AskPanel({ repositoryId, ragAvailable }) {
             )}
           </div>
         ))}
-        {loading && !messages[messages.length - 1]?.streaming && (
+        {loading && !streamingMsg && (
           <div style={{ ...styles.message, ...styles.thinking }}>pensando…</div>
         )}
       </div>
 
       <form onSubmit={handleAsk} style={styles.inputRow}>
         <input
+          ref={inputRef}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           placeholder="¿cómo se autentican los usuarios?"
           style={styles.input}
+          disabled={loading}
         />
-        <button type="submit" style={styles.sendBtn} disabled={loading}>
-          enviar
-        </button>
+        {loading ? (
+          <button type="button" onClick={handleStop} style={styles.stopBtn}>
+            ■ parar
+          </button>
+        ) : (
+          <button type="submit" style={styles.sendBtn} disabled={!question.trim()}>
+            enviar
+          </button>
+        )}
       </form>
     </div>
   );
@@ -227,6 +301,15 @@ const styles = {
     fontSize: 11.5,
     letterSpacing: "0.04em",
     color: "var(--text-secondary)",
+  },
+  clearBtn: {
+    background: "none",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "2px 8px",
+    fontSize: 10,
+    color: "var(--text-tertiary)",
+    cursor: "pointer",
   },
   closeBtn: {
     background: "none",
@@ -286,7 +369,7 @@ const styles = {
     border: "1px solid var(--border-subtle)",
     borderRadius: 6,
     overflow: "hidden",
-    background: "#1E1E1E", // fondo del tema vscDarkPlus, para que el header combine con el código
+    background: "#1E1E1E",
   },
   sourceHeader: {
     display: "flex",
@@ -322,6 +405,19 @@ const styles = {
     color: "var(--text-tertiary)",
     fontSize: 12,
   },
+  copyBtn: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 4,
+    padding: "2px 6px",
+    fontSize: 11,
+    color: "var(--text-tertiary)",
+    cursor: "pointer",
+    opacity: 0.7,
+  },
   inputRow: {
     display: "flex",
     gap: 8,
@@ -348,5 +444,16 @@ const styles = {
     fontWeight: 600,
     color: "#1A1410",
     cursor: "pointer",
+  },
+  stopBtn: {
+    background: "var(--bg-elevated-2)",
+    border: "1px solid var(--border-strong)",
+    borderRadius: 6,
+    padding: "0 12px",
+    fontSize: 11.5,
+    fontWeight: 600,
+    color: "var(--accent-red, #c05a4a)",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   },
 };

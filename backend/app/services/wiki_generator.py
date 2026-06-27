@@ -363,6 +363,7 @@ class WikiGenerator:
         system_prompt: str | None = None,
         max_tokens: int | None = None,
         system_prompt_override: str | None = None,
+        history: list[dict] | None = None,
     ) -> str:
         effective_system = system_prompt_override or (system_prompt if system_prompt is not None else self._p["system"])
 
@@ -377,6 +378,11 @@ class WikiGenerator:
             )
             user_prompt = user_prompt[:user_budget] + "\n... [truncated] ..."
 
+        messages: list[dict] = [{"role": "system", "content": effective_system}]
+        if history:
+            messages.extend({"role": m["role"], "content": m["content"]} for m in history)
+        messages.append({"role": "user", "content": user_prompt})
+
         _retryable = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError)
         last_exc: Exception | None = None
         for attempt in range(4):
@@ -384,10 +390,7 @@ class WikiGenerator:
                 response = await self._client.chat.completions.create(
                     model=self.model,
                     max_completion_tokens=max_tokens or settings.max_chat_tokens,
-                    messages=[
-                        {"role": "system", "content": effective_system},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    messages=messages,
                 )
                 usage = response.usage
                 if usage:
@@ -506,9 +509,10 @@ class WikiGenerator:
         question: str,
         retrieved_chunks: list[RetrievedChunk],
         wiki_summary: str = "",
+        history: list[dict] | None = None,
     ) -> str:
         prompt = self._build_rag_prompt(project_name, question, retrieved_chunks, wiki_summary)
-        return await self._ask(prompt, system_prompt=self._p["chat_system"])
+        return await self._ask(prompt, system_prompt=self._p["chat_system"], history=history)
 
     async def stream_answer_question_rag(
         self,
@@ -516,13 +520,14 @@ class WikiGenerator:
         question: str,
         retrieved_chunks: list[RetrievedChunk],
         wiki_summary: str = "",
+        history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream answer tokens as they arrive from the LLM. Retries connection (not mid-stream)."""
         prompt = self._build_rag_prompt(project_name, question, retrieved_chunks, wiki_summary)
-        messages = [
-            {"role": "system", "content": self._p["chat_system"]},
-            {"role": "user", "content": prompt},
-        ]
+        messages: list[dict] = [{"role": "system", "content": self._p["chat_system"]}]
+        if history:
+            messages.extend({"role": m["role"], "content": m["content"]} for m in history)
+        messages.append({"role": "user", "content": prompt})
 
         _retryable = (openai.APIConnectionError, openai.APITimeoutError, openai.InternalServerError)
         stream = None

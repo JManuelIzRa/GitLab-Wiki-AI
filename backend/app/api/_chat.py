@@ -16,7 +16,7 @@ from app.core.rate_limit import limiter
 from app.db.session import get_session
 from app.models.db_models import Repository, WikiPage
 from app.models.schemas import (
-    ChatRequest, ChatResponse, CodeSearchRequest, CodeSearchResponse, CodeSource,
+    ChatHistoryMessage, ChatRequest, ChatResponse, CodeSearchRequest, CodeSearchResponse, CodeSource,
 )
 from app.services.embedding_client import EmbeddingError, get_embedding_client
 from app.services.vector_store import VectorStore
@@ -32,16 +32,27 @@ def _get_wiki_generator(request: Request) -> WikiGenerator:
 
 
 def _build_wiki_summary(question: str, page_rows: list, budget: int = 4000) -> str:
-    """Rank wiki pages by keyword relevance to the question, then build a context string.
+    """Rank wiki pages by weighted keyword relevance to the question, then build a context string.
 
+    Scoring: title match = 5pts, heading match = 3pts, first-500-char body = 2pts, rest = 1pt.
     Top-3 most relevant pages get up to 800 chars each; remaining pages get 150 chars.
     Total output is capped at *budget* characters to avoid LLM token overflow.
     """
     q_words = {w.lower() for w in question.split() if len(w) > 2}
 
     def relevance(title: str, content: str) -> int:
-        text = f"{title} {content[:400]}".lower()
-        return sum(1 for w in q_words if w in text)
+        if not q_words:
+            return 0
+        title_l = title.lower()
+        headings_l = " ".join(
+            line.lstrip("#").strip() for line in content.split("\n") if line.startswith("#")
+        ).lower()
+        preview_l = content[:500].lower()
+        body_l = content[500:3000].lower()
+        return sum(
+            5 * (w in title_l) + 3 * (w in headings_l) + 2 * (w in preview_l) + (w in body_l)
+            for w in q_words
+        )
 
     ranked = sorted(page_rows, key=lambda r: relevance(r[0], r[1]), reverse=True)
 
@@ -147,12 +158,14 @@ async def chat_with_repo(
         except EmbeddingError as e:
             logger.warning("Embedding failed for chat query, using wiki-only context: %s", e)
 
+    history = [m.model_dump() for m in payload.history] if payload.history else None
     try:
         answer = await wiki_generator.answer_question_rag(
             project_name=repo.name,
             question=payload.question,
             retrieved_chunks=retrieved_chunks,
             wiki_summary=wiki_summary,
+            history=history,
         )
     except openai.AuthenticationError:
         raise HTTPException(status_code=502, detail="No se pudo autenticar contra el LLM configurado.")
@@ -226,6 +239,7 @@ async def stream_chat_with_repo(
 
     repo_name = repo.name
     question = payload.question
+    history = [m.model_dump() for m in payload.history] if payload.history else None
 
     async def event_generator():
         if sources:
@@ -236,6 +250,7 @@ async def stream_chat_with_repo(
                 question=question,
                 retrieved_chunks=retrieved_chunks,
                 wiki_summary=wiki_summary,
+                history=history,
             ):
                 yield f"data: {json.dumps({'token': token})}\n\n"
         except openai.AuthenticationError:

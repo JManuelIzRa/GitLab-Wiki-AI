@@ -1,22 +1,23 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
+# Generated from pyproject.toml — keep in sync when adding dependencies.
+# Prefer: uv sync (or uv pip install -r requirements.txt for plain pip users)
+aiosqlite==0.20.0
+fastapi[standard]==0.115.6
 httpx==0.28.1
+llama-index>=0.12.38
+llama-index-core>=0.12.42
+llama-index-embeddings-huggingface>=0.5.5
 openai==1.59.7
-qdrant-client==1.12.2
-sqlalchemy==2.0.36
 pydantic==2.10.4
 pydantic-settings==2.7.1
-aiosqlite==0.20.0
 python-multipart==0.0.20
+qdrant-client==1.12.2
+sqlalchemy==2.0.36
 tiktoken==0.8.0
-llama-index-core>=0.10.0
-llama-index-embeddings-huggingface>=0.2.0
 tree-sitter>=0.21.0
 tree-sitter-python>=0.21.0
 tree-sitter-javascript>=0.21.0
 tree-sitter-typescript>=0.21.0
-tree-sitter-language-pack>=0.0.1
-slowapi>=0.1.9
-python-json-logger>=2.0.7
-# SQLite dialect for ON CONFLICT DO UPDATE (upsert) support
-# (included in SQLAlchemy 2.x — no extra package needed)
+tree-sitter-language-pack>=1.10.9
+uvicorn[standard]==0.34.0
+slowapi>=0.1.10
+python-json-logger>=4.1.0
