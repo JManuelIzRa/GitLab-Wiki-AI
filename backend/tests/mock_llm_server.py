@@ -3,9 +3,11 @@ Mock de un servidor OpenAI-compatible local (como llama.cpp server o vLLM sirvie
 qwen2.5-3b-instruct-q4_k_m.gguf), para validar WikiGenerator sin depender de la red
 192.168.0.100 del usuario ni de un modelo real.
 """
-from fastapi import FastAPI
-import uvicorn
+
 import time
+
+import uvicorn
+from fastapi import FastAPI
 
 app = FastAPI()
 

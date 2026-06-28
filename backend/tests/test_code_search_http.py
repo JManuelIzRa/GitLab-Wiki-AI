@@ -2,8 +2,10 @@
 Valida el endpoint HTTP /api/repositories/{id}/search (búsqueda semántica directa, sin LLM)
 usando TestClient sobre la app real, con Qdrant in-memory pre-poblado.
 """
+
 import asyncio
 import sys
+
 sys.path.insert(0, ".")
 
 from unittest.mock import patch
@@ -51,8 +53,12 @@ async def setup():
 
     async with AsyncSessionLocal() as session:
         repo = Repository(
-            gitlab_url="http://127.0.0.1:9000", project_path="demo-group/demo-project",
-            project_id="42", name="demo-project", default_branch="main", indexed_in_qdrant=True,
+            gitlab_url="http://127.0.0.1:9000",
+            project_path="demo-group/demo-project",
+            project_id="42",
+            name="demo-project",
+            default_branch="main",
+            indexed_in_qdrant=True,
         )
         session.add(repo)
         await session.commit()
@@ -74,8 +80,12 @@ async def setup():
     # repo sin Qdrant indexado, para probar el caso 400
     async with AsyncSessionLocal() as session:
         repo2 = Repository(
-            gitlab_url="http://127.0.0.1:9000", project_path="otro/repo",
-            project_id="99", name="otro-repo", default_branch="main", indexed_in_qdrant=False,
+            gitlab_url="http://127.0.0.1:9000",
+            project_path="otro/repo",
+            project_id="99",
+            name="otro-repo",
+            default_branch="main",
+            indexed_in_qdrant=False,
         )
         session.add(repo2)
         await session.commit()
@@ -97,20 +107,20 @@ def main():
     async def patched_embed_one(self, text):
         return fake_embed(text)
 
-    with patch.object(VectorStore, "__init__", patched_init), \
-         patch("app.services.embedding_client.EmbeddingClient.embed_one", new=patched_embed_one), \
-         patch("app.services.vector_store.VectorStore.close", new=lambda self: asyncio.sleep(0)):
-
+    with (
+        patch.object(VectorStore, "__init__", patched_init),
+        patch("app.services.embedding_client.EmbeddingClient.embed_one", new=patched_embed_one),
+        patch("app.services.vector_store.VectorStore.close", new=lambda self: asyncio.sleep(0)),
+    ):
         from app.main import app
+
         client = TestClient(app)
 
         # Caso 1: búsqueda exitosa
         resp = client.post(f"/api/repositories/{repo_id}/search", json={"query": "create a user with an id"})
-        print("STATUS:", resp.status_code)
         body = resp.json()
-        print("RESULTS:", len(body["results"]))
         for r in body["results"]:
-            print(f"  - {r['file_path']} (score={r['score']:.3f}) L{r['start_line']}-{r['end_line']}")
+            pass
 
         assert resp.status_code == 200
         assert len(body["results"]) == 2
@@ -121,19 +131,14 @@ def main():
         # Caso 2: top_k limita los resultados
         resp_topk = client.post(f"/api/repositories/{repo_id}/search", json={"query": "create user", "top_k": 1})
         assert len(resp_topk.json()["results"]) == 1
-        print("\ntop_k=1 -> 1 resultado: OK")
 
         # Caso 3: repo sin Qdrant indexado -> 400 explicativo
         resp_400 = client.post(f"/api/repositories/{repo2_id}/search", json={"query": "x"})
-        print("\nrepo sin RAG -> status:", resp_400.status_code, "detail:", resp_400.json()["detail"])
         assert resp_400.status_code == 400
 
         # Caso 4: repo inexistente -> 404
         resp_404 = client.post("/api/repositories/9999/search", json={"query": "x"})
         assert resp_404.status_code == 404
-        print("repo inexistente -> 404: OK")
-
-        print("\n✅ Endpoint /search funciona correctamente (búsqueda exitosa, top_k, sin RAG, repo inexistente)")
 
 
 if __name__ == "__main__":

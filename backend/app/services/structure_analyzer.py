@@ -7,6 +7,7 @@ contexto estructurado en vez de tener que "adivinar" todo desde cero,
 y permite generar partes del wiki (árbol de módulos, stack tecnológico)
 sin gastar tokens.
 """
+
 from __future__ import annotations
 
 import os
@@ -14,12 +15,43 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 EXTENSION_LANGUAGE = {
-    ".py": "Python", ".js": "JavaScript", ".jsx": "JavaScript", ".ts": "TypeScript",
-    ".tsx": "TypeScript", ".java": "Java", ".kt": "Kotlin", ".go": "Go", ".rs": "Rust",
-    ".rb": "Ruby", ".php": "PHP", ".cs": "C#", ".cpp": "C++", ".c": "C", ".h": "C/C++ Header",
-    ".swift": "Swift", ".m": "Objective-C", ".scala": "Scala", ".vue": "Vue",
-    ".sql": "SQL", ".sh": "Shell", ".yml": "YAML", ".yaml": "YAML", ".json": "JSON",
-    ".tf": "Terraform", ".dockerfile": "Docker",
+    ".py": "Python",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".java": "Java",
+    ".kt": "Kotlin",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".rb": "Ruby",
+    ".php": "PHP",
+    ".cs": "C#",
+    ".cpp": "C++",
+    ".c": "C",
+    ".h": "C/C++ Header",
+    ".swift": "Swift",
+    ".m": "Objective-C",
+    ".scala": "Scala",
+    ".vue": "Vue",
+    ".sql": "SQL",
+    ".sh": "Shell",
+    ".yml": "YAML",
+    ".yaml": "YAML",
+    ".json": "JSON",
+    ".tf": "Terraform",
+    ".dockerfile": "Docker",
+    ".ex": "Elixir",
+    ".exs": "Elixir",
+    ".elm": "Elm",
+    ".clj": "Clojure",
+    ".cljs": "ClojureScript",
+    ".hs": "Haskell",
+    ".ml": "OCaml",
+    ".mli": "OCaml",
+    ".dart": "Dart",
+    ".lua": "Lua",
+    ".r": "R",
 }
 
 DEPENDENCY_MANIFESTS = {
@@ -34,23 +66,96 @@ DEPENDENCY_MANIFESTS = {
     "Cargo.toml": "Rust / Cargo",
     "Gemfile": "Ruby / Bundler",
     "composer.json": "PHP / Composer",
-    "*.csproj": "C# / .NET",
+    "mix.exs": "Elixir / Mix",
+    "pubspec.yaml": "Dart / Flutter",
+    "elm.json": "Elm",
+    "stack.yaml": "Haskell / Stack",
+    "cabal.project": "Haskell / Cabal",
+    "dune-project": "OCaml / Dune",
+}
+
+# Workspace / monorepo manifest filenames — their presence at root implies multiple packages.
+MONOREPO_WORKSPACE_FILES = {
+    "pnpm-workspace.yaml",
+    "pnpm-workspace.yml",
+    "nx.json",
+    "rush.json",
+    "lerna.json",
+    "turbo.json",
 }
 
 IGNORED_DIR_PARTS = {
-    "node_modules", ".git", "dist", "build", "vendor", "__pycache__",
-    ".venv", "venv", "target", ".idea", ".vscode", "coverage",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "target",
+    ".idea",
+    ".vscode",
+    "coverage",
+    ".next",
+    ".nuxt",
+    ".output",
+    "out",
+    "tmp",
+    ".tmp",
 }
 
 ENTRYPOINT_HINTS = {
-    "main.py", "app.py", "manage.py", "index.js", "server.js", "main.go",
-    "main.rs", "Main.java", "App.java", "main.ts", "index.ts", "wsgi.py", "asgi.py",
+    # Python
+    "main.py",
+    "app.py",
+    "manage.py",
+    "wsgi.py",
+    "asgi.py",
+    "server.py",
+    "run.py",
+    # JavaScript / TypeScript
+    "index.js",
+    "server.js",
+    "main.ts",
+    "index.ts",
+    "src/index.js",
+    "src/index.ts",
+    "src/main.js",
+    "src/main.ts",
+    # Go
+    "main.go",
+    "cmd/main.go",
+    # Rust
+    "src/main.rs",
+    "main.rs",
+    # Java / Kotlin
+    "Main.java",
+    "App.java",
+    "Application.java",
+    "Main.kt",
+    "App.kt",
+    "Application.kt",
+    # Ruby
+    "config.ru",
+    "app.rb",
+    # PHP
+    "index.php",
+    "public/index.php",
+    # Elixir
+    "lib/application.ex",
+    # Dart / Flutter
+    "lib/main.dart",
+    # Generic
+    "Makefile",
+    "makefile",
 }
 
 
 @dataclass
 class ModuleInfo:
     """Agrupación lógica de archivos bajo un mismo directorio de primer/segundo nivel."""
+
     name: str
     path: str
     file_count: int = 0
@@ -61,14 +166,17 @@ class ModuleInfo:
 @dataclass
 class RepoStructure:
     total_files: int
-    languages: dict[str, int]                  # lenguaje -> nº de archivos
-    dependency_manifests: list[str]              # paths de manifiestos encontrados
-    package_managers: list[str]                  # nombres legibles (Node.js/npm, etc.)
+    languages: dict[str, int]
+    dependency_manifests: list[str]
+    package_managers: list[str]
     modules: list[ModuleInfo]
     entrypoints: list[str]
     readme_path: str | None
-    config_files: list[str]                      # dockerfiles, ci configs, etc.
+    config_files: list[str]
     all_paths: list[str]
+    # Monorepo fields
+    is_monorepo: bool = False
+    workspace_roots: list[str] | None = None
 
 
 def _is_ignored(path: str) -> bool:
@@ -79,6 +187,42 @@ def _is_ignored(path: str) -> bool:
 def _detect_language(path: str) -> str | None:
     _, ext = os.path.splitext(path)
     return EXTENSION_LANGUAGE.get(ext.lower())
+
+
+def _detect_monorepo(file_paths: list[str], package_manifest_paths: list[str]) -> tuple[bool, list[str] | None]:
+    """
+    Returns (is_monorepo, workspace_roots).
+
+    A repo is considered a monorepo if any of these conditions hold:
+    1. A known workspace config file exists at the root.
+    2. A root package.json declares a "workspaces" key (we detect by checking multiple
+       nested package.json files — we can't read file content at this stage, so we use
+       structure as a proxy: 3+ package.json files at different dirs signals a monorepo).
+    """
+    basenames = {os.path.basename(p): p for p in file_paths}
+
+    # Condition 1: explicit workspace manifest at root or shallow path
+    for wf in MONOREPO_WORKSPACE_FILES:
+        if wf in basenames:
+            # Workspace roots are first-level directories that have their own package manifest
+            roots = sorted(
+                {p.split("/")[0] for p in package_manifest_paths if "/" in p and p.split("/")[0] not in {".", ""}}
+            )
+            return True, roots or None
+
+    # Condition 2: multiple package manifests in distinct subdirectories
+    manifest_dirs = sorted(
+        {
+            os.path.dirname(p)
+            for p in package_manifest_paths
+            if os.path.basename(p) in {"package.json", "pyproject.toml", "go.mod", "Cargo.toml"}
+            and os.path.dirname(p) not in {"", "."}
+        }
+    )
+    if len(manifest_dirs) >= 3:
+        return True, manifest_dirs[:20]
+
+    return False, None
 
 
 def analyze_structure(file_paths: list[str]) -> RepoStructure:
@@ -110,16 +254,29 @@ def analyze_structure(file_paths: list[str]) -> RepoStructure:
             dependency_manifests.append(path)
             package_managers.add("C# / .NET")
 
-        if base in ENTRYPOINT_HINTS:
+        # Match both full path and basename against entrypoint hints
+        if path in ENTRYPOINT_HINTS or base in ENTRYPOINT_HINTS:
             entrypoints.append(path)
 
-        if base.lower() in ("dockerfile", "docker-compose.yml", "docker-compose.yaml") or ".gitlab-ci" in base:
+        if (
+            base.lower()
+            in (
+                "dockerfile",
+                "docker-compose.yml",
+                "docker-compose.yaml",
+                "docker-compose.override.yml",
+                "docker-compose.prod.yml",
+            )
+            or ".gitlab-ci" in base
+            or base in (".travis.yml", "Jenkinsfile", "circle.yml")
+            or (base.endswith(".yml") and path.startswith(".github/"))
+        ):
             config_files.append(path)
 
         if base.lower().startswith("readme") and readme_path is None:
             readme_path = path
 
-        # Agrupar en "módulo" por primer directorio significativo
+        # Group into "module" by first significant directory
         parts = path.split("/")
         if len(parts) > 1:
             module_path = parts[0]
@@ -137,8 +294,9 @@ def analyze_structure(file_paths: list[str]) -> RepoStructure:
         if len(mod.sample_files) < 8:
             mod.sample_files.append(path)
 
-    # Ordenar módulos por relevancia (más archivos primero), filtrando ruido de 1 archivo suelto en raíz
     modules = sorted(modules_map.values(), key=lambda m: m.file_count, reverse=True)
+
+    is_monorepo, workspace_roots = _detect_monorepo(file_paths, dependency_manifests)
 
     return RepoStructure(
         total_files=len(file_paths),
@@ -150,4 +308,6 @@ def analyze_structure(file_paths: list[str]) -> RepoStructure:
         readme_path=readme_path,
         config_files=config_files,
         all_paths=file_paths,
+        is_monorepo=is_monorepo,
+        workspace_roots=workspace_roots,
     )

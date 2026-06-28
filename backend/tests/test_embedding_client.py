@@ -1,41 +1,50 @@
-"""Valida EmbeddingClient contra el mock server que replica el contrato OpenAI de embeddings."""
-import asyncio
-import sys
-sys.path.insert(0, ".")
+import httpx
+import pytest
 
 from app.services.embedding_client import EmbeddingClient, EmbeddingError
 
 
-async def main():
-    client = EmbeddingClient(url="http://127.0.0.1:9100/embed", model="text-embedding-3-small")
+@pytest.mark.asyncio
+async def test_http_embedding_batch_preserves_index_order():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        assert body == {"input": ["one", "two"], "model": "demo-model"}
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 1, "embedding": [2.0, 0.0]},
+                    {"index": 0, "embedding": [1.0, 0.0]},
+                ]
+            },
+        )
 
-    single = await client.embed_one("create a user")
-    print(f"embed_one -> vector de dimensión {len(single)}: {single}")
-    assert isinstance(single, list)
-    assert all(isinstance(x, float) for x in single)
-
-    batch = await client.embed_batch(["create a user", "find a router", "export module"])
-    print(f"\nembed_batch -> {len(batch)} vectores")
-    for i, v in enumerate(batch):
-        print(f"  [{i}] {v}")
-    assert len(batch) == 3
-
-    # Lista vacía -> lista vacía, sin llamar a la red
-    empty = await client.embed_batch([])
-    assert empty == []
-    print("\nembed_batch([]) -> [] sin llamar al servicio: OK")
-
-    # Servicio caído -> debe lanzar EmbeddingError, no una excepción cruda de httpx
-    bad_client = EmbeddingClient(url="http://127.0.0.1:9999/embed")
-    try:
-        await bad_client.embed_one("x")
-        print("ERROR: debería haber lanzado EmbeddingError")
-        sys.exit(1)
-    except EmbeddingError as e:
-        print(f"\nServicio caído -> EmbeddingError: OK ({e})")
-
-    print("\n✅ EmbeddingClient funciona correctamente contra el contrato OpenAI de embeddings")
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = EmbeddingClient(
+        url="https://embeddings.test/v1/embeddings",
+        model="demo-model",
+        dimensions=2,
+        http_client=http,
+    )
+    assert await client.embed_batch(["one", "two"]) == [[1.0, 0.0], [2.0, 0.0]]
+    await http.aclose()
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+@pytest.mark.asyncio
+async def test_http_embedding_errors_are_wrapped():
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(503, text="down")))
+    client = EmbeddingClient(url="https://embeddings.test", http_client=http)
+    with pytest.raises(EmbeddingError):
+        await client.embed_one("hello")
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_empty_embedding_batch_skips_http():
+    client = EmbeddingClient(
+        http_client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _request: pytest.fail("HTTP should not be called"))
+        )
+    )
+    assert await client.embed_batch([]) == []
+    await client._http.aclose()

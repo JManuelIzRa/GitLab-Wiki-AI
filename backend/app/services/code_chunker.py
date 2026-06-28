@@ -17,9 +17,11 @@ fallan al parsear (sintaxis inválida, archivo no es realmente código) se degra
 chunk único con todo el contenido, en vez de perderse silenciosamente — más texto del
 necesario en el peor caso es preferible a no indexar nada de ese archivo.
 """
+
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 
 from app.core.config import settings
@@ -30,27 +32,37 @@ logger = logging.getLogger(__name__)
 # (ver https://github.com/Goldziher/tree-sitter-language-pack para la lista completa).
 EXTENSION_TO_TREE_SITTER_LANGUAGE: dict[str, str] = {
     ".py": "python",
-    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
-    ".ts": "typescript", ".tsx": "tsx",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
     ".java": "java",
-    ".kt": "kotlin", ".kts": "kotlin",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
     ".go": "go",
     ".rs": "rust",
     ".rb": "ruby",
     ".php": "php",
     ".cs": "c_sharp",
-    ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp",
-    ".c": "c", ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".c": "c",
+    ".h": "c",
     ".swift": "swift",
     ".scala": "scala",
-    ".sh": "bash", ".bash": "bash",
+    ".sh": "bash",
+    ".bash": "bash",
 }
 
 
 @dataclass
 class CodeChunk:
     file_path: str
-    chunk_index: int          # posición del chunk dentro del archivo (0, 1, 2...)
+    chunk_index: int  # posición del chunk dentro del archivo (0, 1, 2...)
     start_line: int
     end_line: int
     content: str
@@ -93,10 +105,61 @@ def _char_idx_to_line(text: str, char_idx: int) -> int:
     return text.count("\n", 0, char_idx) + 1
 
 
-def _fallback_single_chunk(file_path: str, content: str) -> list[CodeChunk]:
-    """Usado cuando no hay gramática tree-sitter para el lenguaje, o el parseo falla."""
-    line_count = content.count("\n") + 1
-    return [CodeChunk(file_path=file_path, chunk_index=0, start_line=1, end_line=line_count, content=content)]
+def _fallback_line_chunks(file_path: str, content: str) -> list[CodeChunk]:
+    """
+    Line-based chunking fallback for when tree-sitter is unavailable or fails.
+
+    Accumulates lines until the chunk would exceed `code_chunk_max_chars`, then starts
+    a new chunk overlapping by `code_chunk_lines_overlap` lines. This guarantees that:
+    - No chunk exceeds the configured char limit (important for embedding services).
+    - Large files produce multiple searchable chunks even without AST awareness.
+    - Small files that fit entirely within the limit return a single chunk.
+    """
+    lines = content.splitlines()
+    if not lines:
+        return []
+
+    max_chars = settings.code_chunk_max_chars
+    overlap = settings.code_chunk_lines_overlap
+    chunks: list[CodeChunk] = []
+    i = 0  # index of the first line of the current chunk
+
+    while i < len(lines):
+        chunk_lines: list[str] = []
+        char_count = 0
+        j = i
+        while j < len(lines):
+            line = lines[j]
+            # Account for the joining newline between lines.
+            addition = len(line) + (1 if chunk_lines else 0)
+            if chunk_lines and char_count + addition > max_chars:
+                break
+            chunk_lines.append(line)
+            char_count += addition
+            j += 1
+
+        if not chunk_lines:
+            # Degenerate: a single line exceeds max_chars — include it truncated.
+            chunk_lines = [lines[i][:max_chars]]
+            j = i + 1
+
+        chunks.append(
+            CodeChunk(
+                file_path=file_path,
+                chunk_index=len(chunks),
+                start_line=i + 1,
+                end_line=j,
+                content="\n".join(chunk_lines),
+            )
+        )
+
+        if j >= len(lines):
+            break
+
+        # Advance by (chunk_size − overlap) so successive chunks share context lines.
+        i += max(1, len(chunk_lines) - overlap)
+
+    return chunks
 
 
 def chunk_file(file_path: str, content: str, language: str | None = None, parser=None) -> list[CodeChunk]:
@@ -115,12 +178,11 @@ def chunk_file(file_path: str, content: str, language: str | None = None, parser
         return []
 
     if language is None:
-        import os
         ext = os.path.splitext(file_path)[1].lower()
         language = EXTENSION_TO_TREE_SITTER_LANGUAGE.get(ext)
 
     if language is None:
-        return _fallback_single_chunk(file_path, content)
+        return _fallback_line_chunks(file_path, content)
 
     try:
         splitter = _get_code_splitter(language, parser=parser)
@@ -129,12 +191,11 @@ def chunk_file(file_path: str, content: str, language: str | None = None, parser
         doc = Document(text=content)
         nodes = splitter.get_nodes_from_documents([doc])
     except Exception as e:  # noqa: BLE001 - parser inexistente, código con sintaxis inválida, etc.
-        logger.warning("CodeSplitter falló para '%s' (lenguaje=%s): %s; usando chunk único.",
-                        file_path, language, e)
-        return _fallback_single_chunk(file_path, content)
+        logger.warning("CodeSplitter falló para '%s' (lenguaje=%s): %s; usando chunk único.", file_path, language, e)
+        return _fallback_line_chunks(file_path, content)
 
     if not nodes:
-        return _fallback_single_chunk(file_path, content)
+        return _fallback_line_chunks(file_path, content)
 
     chunks: list[CodeChunk] = []
     for i, node in enumerate(nodes):
@@ -150,9 +211,15 @@ def chunk_file(file_path: str, content: str, language: str | None = None, parser
             start_line = 1
             end_line = node_text.count("\n") + 1
 
-        chunks.append(CodeChunk(
-            file_path=file_path, chunk_index=i, start_line=start_line, end_line=end_line, content=node_text,
-        ))
+        chunks.append(
+            CodeChunk(
+                file_path=file_path,
+                chunk_index=i,
+                start_line=start_line,
+                end_line=end_line,
+                content=node_text,
+            )
+        )
 
     return chunks
 
@@ -170,7 +237,6 @@ def chunk_files(file_contents: dict[str, str], parsers_by_language: dict[str, ob
     parsers_by_language = parsers_by_language or {}
     all_chunks: list[CodeChunk] = []
     for path, content in file_contents.items():
-        import os
         ext = os.path.splitext(path)[1].lower()
         language = EXTENSION_TO_TREE_SITTER_LANGUAGE.get(ext)
         parser = parsers_by_language.get(language) if language else None

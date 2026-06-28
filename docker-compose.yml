@@ -1,0 +1,69 @@
+services:
+  # ── Qdrant vector store ────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.9.0@sha256:2c1b5428cf1b40f9e27835218e6eb0431265718ba0d7cf09a50b143d1b457e04
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── FastAPI backend ────────────────────────────────────────────────────────
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env          # copy from backend/.env.example and edit
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - DATABASE_URL=sqlite+aiosqlite:///./data/deepwiki.db
+    volumes:
+      - backend_data:/app/data  # persists SQLite DB between restarts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── React frontend (nginx) ─────────────────────────────────────────────────
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  backend_data:
+
+# ── Notes ──────────────────────────────────────────────────────────────────
+# LLM and embedding services are NOT included here — they are user-provided:
+#   OPENAI_URL      URL of an OpenAI-compatible LLM server (local or cloud)
+#   EMBEDDING_URL   URL of an embedding server (local or cloud)
+#
+# Quick start:
+#   1. cp backend/.env.example backend/.env  # edit OPENAI_URL, EMBEDDING_URL, etc.
+#   2. docker compose up --build
+#   3. Open http://localhost:5173

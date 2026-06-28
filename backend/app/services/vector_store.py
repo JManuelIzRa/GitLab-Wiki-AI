@@ -10,19 +10,34 @@ Los IDs de punto se derivan determinísticamente del path+chunk_index del códig
 (vía UUID5), así que reindexar el mismo archivo sobreescribe el punto en vez de
 duplicarlo.
 """
+
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, MatchAny, PointStruct, VectorParams
 
 from app.core.config import settings
 from app.services.code_chunker import CodeChunk
 
+logger = logging.getLogger(__name__)
+
 # Namespace fijo para generar UUIDs deterministas a partir de chunk_id (mismo input -> mismo UUID).
 _POINT_ID_NAMESPACE = uuid.UUID("a51e0e0a-3c2c-4f3b-9b8e-5a2f0a6e8d10")
+
+# Shared singleton: one AsyncQdrantClient for the entire process lifetime.
+# asyncio is single-threaded so sharing is safe; avoids per-VectorStore connection overhead.
+_shared_qdrant_client: AsyncQdrantClient | None = None
+
+
+def _get_qdrant_client() -> AsyncQdrantClient:
+    global _shared_qdrant_client
+    if _shared_qdrant_client is None:
+        _shared_qdrant_client = AsyncQdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+    return _shared_qdrant_client
 
 
 @dataclass
@@ -38,7 +53,7 @@ class VectorStore:
     def __init__(self, repository_id: int):
         self.repository_id = repository_id
         self.collection_name = f"{settings.qdrant_collection_prefix}{repository_id}"
-        self._client = AsyncQdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+        self._client = _get_qdrant_client()
 
     @staticmethod
     def _point_id(chunk_id: str) -> str:
@@ -46,14 +61,18 @@ class VectorStore:
 
     async def reset_collection(self) -> None:
         """Borra (si existe) y recrea la colección de este repo. Se llama antes de cada reindexado."""
-        try:
-            await self._client.delete_collection(self.collection_name)
-        except Exception:
-            pass  # la colección puede no existir todavía en el primer indexado, no es un error
+        await self.drop_collection()
         await self._client.create_collection(
             collection_name=self.collection_name,
             vectors_config=VectorParams(size=settings.embedding_dimensions, distance=Distance.COSINE),
         )
+
+    async def drop_collection(self) -> None:
+        """Borra la colección si existe. Silencia el error si no existía."""
+        try:
+            await self._client.delete_collection(self.collection_name)
+        except Exception:
+            logger.warning("No se pudo borrar la colección Qdrant '%s'", self.collection_name, exc_info=True)
 
     async def upsert_chunks(self, chunks: list[CodeChunk], embeddings: list[list[float]]) -> None:
         """Sube (o sobreescribe) los puntos correspondientes a una lista de chunks ya embebidos."""
@@ -88,8 +107,11 @@ class VectorStore:
                 limit=top_k,
             )
         except Exception:
-            # La colección puede no existir si el repo aún no se indexó con esta versión del código,
-            # o si Qdrant está caído. El llamador decide cómo degradar (ej. responder sin contexto de código).
+            logger.warning(
+                "Búsqueda en Qdrant fallida para colección '%s'; degradando a contexto sin código.",
+                self.collection_name,
+                exc_info=True,
+            )
             return []
 
         return [
@@ -103,5 +125,47 @@ class VectorStore:
             for point in results.points
         ]
 
+    async def delete_by_file_paths(self, file_paths: set[str]) -> None:
+        """Delete all Qdrant points whose file_path payload matches any of the given paths.
+
+        Used for incremental re-indexing: instead of dropping and recreating the entire
+        collection when a file is deleted, only the affected points are removed.
+        """
+        if not file_paths:
+            return
+        try:
+            await self._client.delete(
+                collection_name=self.collection_name,
+                points_selector=Filter(must=[FieldCondition(key="file_path", match=MatchAny(any=list(file_paths)))]),
+            )
+            logger.info("Deleted Qdrant points for %d paths in '%s'", len(file_paths), self.collection_name)
+        except Exception:
+            logger.warning("Failed to delete points for paths in '%s'", self.collection_name, exc_info=True)
+
     async def close(self) -> None:
-        await self._client.close()
+        pass  # Shared singleton — do not close
+
+    @staticmethod
+    async def cleanup_orphan_collections(known_repo_ids: set[int]) -> None:
+        """Delete Qdrant collections whose repo ID is no longer in the database."""
+        prefix = settings.qdrant_collection_prefix
+        client = _get_qdrant_client()
+        try:
+            response = await client.get_collections()
+            for col in response.collections:
+                name = col.name
+                if not name.startswith(prefix):
+                    continue
+                suffix = name[len(prefix) :]
+                try:
+                    repo_id = int(suffix)
+                except ValueError:
+                    continue
+                if repo_id not in known_repo_ids:
+                    logger.info("Deleting orphan Qdrant collection '%s' (repo %d not in DB)", name, repo_id)
+                    try:
+                        await client.delete_collection(name)
+                    except Exception:
+                        logger.warning("Failed to delete orphan collection '%s'", name, exc_info=True)
+        except Exception:
+            logger.warning("Qdrant orphan cleanup failed; skipping.", exc_info=True)

@@ -1,10 +1,12 @@
 """Valida WikiGenerator usando AsyncOpenAI contra el mock del servidor LLM local."""
+
 import asyncio
 import sys
+
 sys.path.insert(0, ".")
 
-from app.services.wiki_generator import WikiGenerator
 from app.services.vector_store import RetrievedChunk
+from app.services.wiki_generator import WikiGenerator
 
 
 async def main():
@@ -12,7 +14,6 @@ async def main():
 
     # _ask básico
     answer = await generator._ask("Genera la página Overview del proyecto demo")
-    print(f"_ask (Overview) -> {answer!r}")
     assert "Resumen" in answer
 
     # answer_question_rag con chunks recuperados simulados
@@ -38,7 +39,6 @@ async def main():
         retrieved_chunks=fake_chunks,
         wiki_summary="## Overview\nProyecto demo en Node/Express.",
     )
-    print(f"\nanswer_question_rag -> {rag_answer!r}")
     assert "userStore" in rag_answer or "Map" in rag_answer
 
     # answer_question_rag sin chunks (Qdrant no disponible) -> no debe lanzar excepción,
@@ -46,9 +46,9 @@ async def main():
     # (verificamos esto inspeccionando _format_retrieved_chunks directamente, ya que el
     # mock siempre devuelve la misma respuesta fija para cualquier prompt con ese marcador).
     from app.services.wiki_generator import _format_retrieved_chunks
+
     empty_context = _format_retrieved_chunks([])
     assert "no se encontraron fragmentos" in empty_context.lower()
-    print(f"\n_format_retrieved_chunks([]) -> {empty_context!r}")
 
     rag_answer_no_chunks = await generator.answer_question_rag(
         project_name="demo-project",
@@ -56,10 +56,7 @@ async def main():
         retrieved_chunks=[],
         wiki_summary="## Overview\nProyecto demo.",
     )
-    print(f"answer_question_rag sin chunks -> {rag_answer_no_chunks!r}")
     assert rag_answer_no_chunks  # no vacío, generó algo (el mock siempre responde algo no vacío)
-
-    print("\n✅ WikiGenerator (cliente OpenAI) funciona correctamente contra servidor LLM local")
 
 
 if __name__ == "__main__":
