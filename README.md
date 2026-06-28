@@ -24,7 +24,8 @@ frontend/   React + Vite SPA: connection form, indexing progress, wiki reader
 ### Requirements
 
 - Python 3.11+
-- Node.js 18+
+- Node.js 20+
+- [uv](https://docs.astral.sh/uv/) for locked Python dependency management
 - OpenAI-compatible LLM and embedding HTTP endpoints (see configuration below)
 - A GitLab Personal Access Token with `read_api` and `read_repository` scopes
 
@@ -46,11 +47,11 @@ Open **http://localhost:5173**. The LLM and embedding services are external — 
 **Backend:**
 ```bash
 cd backend
-pip install -r requirements.txt    # or: uv sync
+uv sync --dev
 
 cp .env.example .env               # edit with your LLM/embedding URLs
 
-uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
 API at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
@@ -112,7 +113,7 @@ Then in the frontend connection form:
 
 ```bash
 # Backend tests
-cd backend && python -m pytest tests/ -x -q
+cd backend && uv run pytest tests/ -x -q
 
 # Frontend tests + lint
 cd frontend && npm test -- --run && npm run lint
@@ -140,7 +141,8 @@ frontend/   SPA en React + Vite: formulario de conexión, progreso de indexado, 
 ### Requisitos
 
 - Python 3.11+
-- Node.js 18+
+- Node.js 20+
+- [uv](https://docs.astral.sh/uv/) para gestionar las dependencias Python bloqueadas
 - Un servidor LLM compatible con la API de OpenAI para generación de wiki y chat RAG
 - Un Personal Access Token de GitLab con scopes `read_api` y `read_repository`
 
