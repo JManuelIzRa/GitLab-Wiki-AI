@@ -84,8 +84,7 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
         target_branch = branch or project.default_branch
         target_commit_sha = await client.get_branch_commit_sha(project.id, target_branch)
 
-        # --- Indexado incremental: si el commit no cambió desde la última vez y ya hay un wiki
-        # generado, no hace falta volver a leer todo el árbol ni gastar llamadas al LLM/embeddings.
+        # Indexado incremental: si el commit no cambió y ya hay wiki generado, reutilizarlo.
         previous_sha = repo.last_commit_sha
         existing_pages_count = (
             await session.execute(
@@ -108,22 +107,19 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
         repo.last_commit_sha = target_commit_sha
         await session.commit()
 
-        # --- 2. Árbol de archivos ---
+        # --- 2. Árbol de archivos + análisis estático ---
         await _update_job(session, job, progress=15, step="Listando árbol de archivos del repositorio...")
         tree_files = await client.list_repository_tree(project.id, target_branch, settings.max_files_to_index)
         all_paths = [f.path for f in tree_files]
         _truncated = len(tree_files) >= settings.max_files_to_index
 
-        # --- 3. Análisis estático (sin IA) ---
         await _update_job(session, job, status=JobStatus.ANALYZING.value, progress=25, step="Analizando estructura del repositorio...")
         structure = analyze_structure(all_paths)
-
-        # Persist monorepo metadata discovered by structure_analyzer
         repo.is_monorepo = structure.is_monorepo
         repo.workspace_roots = structure.workspace_roots
         await session.commit()
 
-        # --- 4. Leer README y manifiestos de dependencias en paralelo ---
+        # --- 3. README + manifiestos + páginas existentes ---
         await _update_job(session, job, progress=35, step="Leyendo README y manifiestos de dependencias...")
         readme_content = None
         if structure.readme_path:
@@ -139,16 +135,8 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
             if c
         ]
 
-        generator = WikiGenerator(
-            language=repo.wiki_language or None,
-            prompt_overrides=repo.prompt_overrides or None,
-        )
-        system_prompt_override = repo.system_prompt or None
-        new_pages: list[WikiPage] = []
-        order_counter = 0
-
-        # Load existing pages for incremental regeneration: if a page's source hash
-        # hasn't changed since the last run, we reuse its content instead of calling the LLM.
+        # Load existing pages for incremental regeneration: pages whose source hash
+        # hasn't changed since the last run are reused without calling the LLM.
         existing_pages: dict[str, WikiPage] = {
             p.slug: p
             for p in (
@@ -156,190 +144,23 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
             ).scalars().all()
         }
 
-        try:
-            # --- 5. Página: Overview ---
-            await _update_job(session, job, status=JobStatus.GENERATING.value, progress=45, step="Generando página: Overview...")
-            lang_summary = ", ".join(f"{l}:{c}" for l, c in list(structure.languages.items())[:8])
-            overview_hash = _compute_source_hash(
-                readme_content or "",
-                lang_summary,
-                ",".join(structure.package_managers),
-                ",".join(structure.dependency_manifests),
-            )
-            _reused_overview = _reuse_if_unchanged("overview", overview_hash, existing_pages, force_reindex)
-            overview_md = _reused_overview or await generator.generate_overview(
-                project.name, structure, readme_content, system_prompt_override=system_prompt_override
-            )
-            new_pages.append(WikiPage(
-                repository_id=repo.id, slug="overview", title="Overview", order=order_counter,
-                content_markdown=overview_md, source_files=[structure.readme_path] if structure.readme_path else [],
-                source_hash=overview_hash,
-                is_ai_generated=True,
-            ))
-            order_counter += 1
+        # --- 4. Generación de páginas wiki (LLM) ---
+        new_pages = await _generate_wiki_pages(
+            session, job, repo, client, project, target_branch,
+            structure, readme_content, manifest_snippets, existing_pages, force_reindex,
+        )
+        await _persist_wiki_pages(session, repo, new_pages)
 
-            # --- 6. Página: Arquitectura ---
-            await _update_job(session, job, progress=55, step="Generando página: Arquitectura...")
-            modules_desc_key = "|".join(
-                f"{m.path}:{m.file_count}:{','.join(m.languages)}" for m in structure.modules[:25]
-            )
-            arch_hash = _compute_source_hash(
-                modules_desc_key,
-                ",".join(structure.entrypoints),
-                ",".join(structure.config_files),
-            )
-            _reused_arch = _reuse_if_unchanged("architecture", arch_hash, existing_pages, force_reindex)
-            arch_md = _reused_arch or await generator.generate_architecture(
-                project.name, structure, system_prompt_override=system_prompt_override
-            )
-            new_pages.append(WikiPage(
-                repository_id=repo.id, slug="architecture", title="Arquitectura", order=order_counter,
-                content_markdown=arch_md, source_files=[m.path for m in structure.modules[:25]],
-                source_hash=arch_hash,
-                is_ai_generated=True,
-            ))
-            order_counter += 1
-
-            # --- 7. Páginas por módulo principal (generadas en paralelo) ---
-            top_modules = [m for m in structure.modules if m.path != "."][:settings.max_module_pages]
-            await _update_job(session, job, progress=60,
-                               step=f"Generando {len(top_modules)} páginas de módulo en paralelo...")
-
-            _llm_sem = asyncio.Semaphore(settings.max_concurrent_module_generations)
-
-            async def _process_module(module) -> WikiPage | None:
-                sample_paths = module.sample_files[:settings.sample_files_per_module]
-                sample_contents = await asyncio.gather(
-                    *[client.get_file_content(project.id, fp, target_branch) for fp in sample_paths]
-                )
-                snippets = [
-                    FileSnippet(path=fp, content=c)
-                    for fp, c in zip(sample_paths, sample_contents)
-                    # Enforce size limit here too (embedding check covers Qdrant; this covers LLM prompts)
-                    if c and len(c.encode()) <= settings.max_file_size_bytes
-                ]
-                if not snippets:
-                    return None
-                slug = "module-" + module.path.replace("/", "-").lower()
-                mod_hash = _compute_source_hash(*(s.content for s in snippets))
-                cached = _reuse_if_unchanged(slug, mod_hash, existing_pages, force_reindex)
-                if cached is None:
-                    async with _llm_sem:
-                        cached = await generator.generate_module_page(
-                            project.name, module, snippets,
-                            system_prompt_override=system_prompt_override,
-                        )
-                return WikiPage(
-                    repository_id=repo.id, slug=slug, title=f"Módulo: {module.path}",
-                    order=0,  # filled in below after sorting
-                    parent_slug="modules", content_markdown=cached,
-                    source_files=[s.path for s in snippets],
-                    source_hash=mod_hash,
-                    is_ai_generated=True,
-                )
-
-            module_pages = await asyncio.gather(*[_process_module(m) for m in top_modules])
-            for page in module_pages:
-                if page is not None:
-                    page.order = order_counter
-                    new_pages.append(page)
-                    order_counter += 1
-
-            # --- 8. Página: Cómo ejecutar el proyecto ---
-            await _update_job(session, job, progress=80, step="Generando página: Cómo ejecutar el proyecto...")
-            setup_hash = _compute_source_hash(
-                *(s.content for s in manifest_snippets),
-                readme_content or "",
-                ",".join(structure.package_managers),
-            )
-            _reused_setup = _reuse_if_unchanged("setup", setup_hash, existing_pages, force_reindex)
-            setup_md = _reused_setup or await generator.generate_setup_guide(
-                project.name, structure, manifest_snippets, readme_content,
-                system_prompt_override=system_prompt_override,
-            )
-            new_pages.append(WikiPage(
-                repository_id=repo.id, slug="setup", title="Cómo ejecutar el proyecto", order=order_counter,
-                content_markdown=setup_md, source_files=structure.dependency_manifests,
-                source_hash=setup_hash,
-                is_ai_generated=True,
-            ))
-
-        finally:
-            await generator.close()
-
-        # Atomic swap: delete old pages and insert all new ones in a single commit.
-        # If anything above raised an exception, old pages are preserved (no delete ran).
-        await session.execute(delete(WikiPage).where(WikiPage.repository_id == repo.id))
-        session.add_all(new_pages)
-        await session.commit()
-
-        # Rebuild the FTS5 index for this repo so text search stays current.
-        try:
-            await session.execute(text("INSERT INTO wiki_pages_fts(wiki_pages_fts) VALUES('rebuild')"))
-            await session.commit()
-        except Exception:  # noqa: BLE001 — FTS rebuild is a non-critical optimisation
-            logger.warning("FTS rebuild skipped for repo %s (table may not exist yet)", repo.id)
-
-        # --- 9. Lectura de archivos de código en paralelo (reutilizada por Qdrant y el grafo) ---
+        # --- 5. Archivos de código (compartido por grafo y embeddings) ---
         await _update_job(session, job, progress=82, step="Leyendo archivos de código del repositorio...")
         code_file_contents = await _read_code_files(client, project.id, target_branch, structure)
 
-        # --- 10. Grafo de dependencias entre módulos ---
+        # --- 6. Grafo de dependencias ---
         await _update_job(session, job, progress=85, step="Construyendo grafo de dependencias entre módulos...")
-        try:
-            languages_by_path = {
-                path: EXTENSION_LANGUAGE.get(os.path.splitext(path)[1].lower())
-                for path in code_file_contents
-            }
-            graph = build_dependency_graph(code_file_contents, languages_by_path)
-            repo.dependency_graph = {
-                "nodes": graph.nodes,
-                "edges": [{"source": e.source, "target": e.target, "weight": e.weight} for e in graph.edges],
-            }
-        except Exception:
-            logger.exception("Fallo construyendo el grafo de dependencias para repo %s (job %s)", repo.id, job.id)
-            repo.dependency_graph = {"nodes": [], "edges": []}
-        await session.commit()
+        await _update_dependency_graph(session, repo, code_file_contents, job.id)
 
-        # --- 11. Incremental vector indexing ---
-        # Failure here (Qdrant down, embedding service down) must NOT fail the job:
-        # the generated wiki is still valid and useful without RAG.
-        await _update_job(session, job, status=JobStatus.EMBEDDING.value, progress=90,
-                           step="Indexando código en Qdrant para búsqueda semántica...")
-        try:
-            new_hashes = _compute_file_hashes(code_file_contents)
-            old_hashes: dict[str, str] = repo.file_hashes or {}
-
-            changed_files = {p: c for p, c in code_file_contents.items() if new_hashes[p] != old_hashes.get(p)}
-            deleted_paths = set(old_hashes) - set(new_hashes)
-
-            if not changed_files and not deleted_paths:
-                logger.info("No code files changed since last embed for repo %s; skipping re-embedding.", repo.id)
-                repo.indexed_in_qdrant = True
-            else:
-                # Full reset only on first indexing; on subsequent runs deleted files are
-                # removed point-by-point via delete_by_file_paths so unchanged vectors survive.
-                full_reset = not repo.indexed_in_qdrant
-                files_to_embed = code_file_contents if full_reset else changed_files
-                logger.info(
-                    "Embedding %d/%d files for repo %s (full_reset=%s, deleted=%d)",
-                    len(files_to_embed), len(code_file_contents), repo.id, full_reset, len(deleted_paths),
-                )
-                await _embed_repository_code(
-                    files_to_embed, repo.id,
-                    full_reset=full_reset,
-                    # Remove changed paths before upserting too. Otherwise old trailing
-                    # chunks survive when a changed file becomes shorter.
-                    deleted_paths=(deleted_paths | set(changed_files)) if not full_reset else None,
-                )
-                repo.indexed_in_qdrant = True
-
-            repo.file_hashes = new_hashes
-        except Exception:
-            logger.exception("Fallo indexando código en Qdrant para repo %s (job %s); el wiki sigue disponible.",
-                              repo.id, job.id)
-            repo.indexed_in_qdrant = False
-        await session.commit()
+        # --- 7. Indexado vectorial incremental ---
+        await _run_incremental_qdrant_index(session, job, repo, code_file_contents)
 
         done_step = "Indexado completo."
         if _truncated:
@@ -348,6 +169,224 @@ async def _index_repository(session: AsyncSession, job: IndexJob, repo: Reposito
                 "el repo puede tener más. Aumenta MAX_FILES_TO_INDEX para indexado completo."
             )
         await _update_job(session, job, status=JobStatus.DONE.value, progress=100, step=done_step)
+
+
+async def _generate_wiki_pages(
+    session: AsyncSession,
+    job: IndexJob,
+    repo: Repository,
+    client: GitLabClient,
+    project,
+    target_branch: str,
+    structure,
+    readme_content: str | None,
+    manifest_snippets: list[FileSnippet],
+    existing_pages: dict[str, WikiPage],
+    force_reindex: bool,
+) -> list[WikiPage]:
+    """Run all LLM generation steps and return the full set of new WikiPage objects.
+
+    Reuses cached page content when the source hash is unchanged (incremental mode).
+    The WikiGenerator is always closed in the finally block even if a step raises.
+    """
+    generator = WikiGenerator(
+        language=repo.wiki_language or None,
+        prompt_overrides=repo.prompt_overrides or None,
+    )
+    system_prompt_override = repo.system_prompt or None
+    new_pages: list[WikiPage] = []
+    order_counter = 0
+
+    try:
+        # Overview
+        await _update_job(session, job, status=JobStatus.GENERATING.value, progress=45, step="Generando página: Overview...")
+        lang_summary = ", ".join(f"{l}:{c}" for l, c in list(structure.languages.items())[:8])
+        overview_hash = _compute_source_hash(
+            readme_content or "",
+            lang_summary,
+            ",".join(structure.package_managers),
+            ",".join(structure.dependency_manifests),
+        )
+        overview_md = _reuse_if_unchanged("overview", overview_hash, existing_pages, force_reindex) or \
+            await generator.generate_overview(
+                project.name, structure, readme_content, system_prompt_override=system_prompt_override
+            )
+        new_pages.append(WikiPage(
+            repository_id=repo.id, slug="overview", title="Overview", order=order_counter,
+            content_markdown=overview_md, source_files=[structure.readme_path] if structure.readme_path else [],
+            source_hash=overview_hash, is_ai_generated=True,
+        ))
+        order_counter += 1
+
+        # Architecture
+        await _update_job(session, job, progress=55, step="Generando página: Arquitectura...")
+        modules_desc_key = "|".join(
+            f"{m.path}:{m.file_count}:{','.join(m.languages)}" for m in structure.modules[:25]
+        )
+        arch_hash = _compute_source_hash(
+            modules_desc_key,
+            ",".join(structure.entrypoints),
+            ",".join(structure.config_files),
+        )
+        arch_md = _reuse_if_unchanged("architecture", arch_hash, existing_pages, force_reindex) or \
+            await generator.generate_architecture(
+                project.name, structure, system_prompt_override=system_prompt_override
+            )
+        new_pages.append(WikiPage(
+            repository_id=repo.id, slug="architecture", title="Arquitectura", order=order_counter,
+            content_markdown=arch_md, source_files=[m.path for m in structure.modules[:25]],
+            source_hash=arch_hash, is_ai_generated=True,
+        ))
+        order_counter += 1
+
+        # Module pages (parallel)
+        top_modules = [m for m in structure.modules if m.path != "."][:settings.max_module_pages]
+        await _update_job(session, job, progress=60,
+                           step=f"Generando {len(top_modules)} páginas de módulo en paralelo...")
+
+        _llm_sem = asyncio.Semaphore(settings.max_concurrent_module_generations)
+
+        async def _process_module(module) -> WikiPage | None:
+            sample_paths = module.sample_files[:settings.sample_files_per_module]
+            sample_contents = await asyncio.gather(
+                *[client.get_file_content(project.id, fp, target_branch) for fp in sample_paths]
+            )
+            snippets = [
+                FileSnippet(path=fp, content=c)
+                for fp, c in zip(sample_paths, sample_contents)
+                if c and len(c.encode()) <= settings.max_file_size_bytes
+            ]
+            if not snippets:
+                return None
+            slug = "module-" + module.path.replace("/", "-").lower()
+            mod_hash = _compute_source_hash(*(s.content for s in snippets))
+            content = _reuse_if_unchanged(slug, mod_hash, existing_pages, force_reindex)
+            if content is None:
+                async with _llm_sem:
+                    content = await generator.generate_module_page(
+                        project.name, module, snippets,
+                        system_prompt_override=system_prompt_override,
+                    )
+            return WikiPage(
+                repository_id=repo.id, slug=slug, title=f"Módulo: {module.path}",
+                order=0,  # filled in below after gathering
+                parent_slug="modules", content_markdown=content,
+                source_files=[s.path for s in snippets],
+                source_hash=mod_hash, is_ai_generated=True,
+            )
+
+        module_pages = await asyncio.gather(*[_process_module(m) for m in top_modules])
+        for page in module_pages:
+            if page is not None:
+                page.order = order_counter
+                new_pages.append(page)
+                order_counter += 1
+
+        # Setup guide
+        await _update_job(session, job, progress=80, step="Generando página: Cómo ejecutar el proyecto...")
+        setup_hash = _compute_source_hash(
+            *(s.content for s in manifest_snippets),
+            readme_content or "",
+            ",".join(structure.package_managers),
+        )
+        setup_md = _reuse_if_unchanged("setup", setup_hash, existing_pages, force_reindex) or \
+            await generator.generate_setup_guide(
+                project.name, structure, manifest_snippets, readme_content,
+                system_prompt_override=system_prompt_override,
+            )
+        new_pages.append(WikiPage(
+            repository_id=repo.id, slug="setup", title="Cómo ejecutar el proyecto", order=order_counter,
+            content_markdown=setup_md, source_files=structure.dependency_manifests,
+            source_hash=setup_hash, is_ai_generated=True,
+        ))
+    finally:
+        await generator.close()
+
+    return new_pages
+
+
+async def _persist_wiki_pages(
+    session: AsyncSession, repo: Repository, new_pages: list[WikiPage],
+) -> None:
+    """Atomically swap old wiki pages for new ones and rebuild the FTS index."""
+    await session.execute(delete(WikiPage).where(WikiPage.repository_id == repo.id))
+    session.add_all(new_pages)
+    await session.commit()
+    try:
+        await session.execute(text("INSERT INTO wiki_pages_fts(wiki_pages_fts) VALUES('rebuild')"))
+        await session.commit()
+    except Exception:  # noqa: BLE001 — FTS rebuild is a non-critical optimisation
+        logger.warning("FTS rebuild skipped for repo %s (table may not exist yet)", repo.id)
+
+
+async def _update_dependency_graph(
+    session: AsyncSession,
+    repo: Repository,
+    code_file_contents: dict[str, str],
+    job_id: int,
+) -> None:
+    """Build the module dependency graph from code file contents and persist it on the repo."""
+    try:
+        languages_by_path = {
+            path: EXTENSION_LANGUAGE.get(os.path.splitext(path)[1].lower())
+            for path in code_file_contents
+        }
+        graph = build_dependency_graph(code_file_contents, languages_by_path)
+        repo.dependency_graph = {
+            "nodes": graph.nodes,
+            "edges": [{"source": e.source, "target": e.target, "weight": e.weight} for e in graph.edges],
+        }
+    except Exception:
+        logger.exception("Fallo construyendo el grafo de dependencias para repo %s (job %s)", repo.id, job_id)
+        repo.dependency_graph = {"nodes": [], "edges": []}
+    await session.commit()
+
+
+async def _run_incremental_qdrant_index(
+    session: AsyncSession,
+    job: IndexJob,
+    repo: Repository,
+    code_file_contents: dict[str, str],
+) -> None:
+    """Incrementally update the Qdrant collection: skip unchanged files, remove deleted ones.
+
+    Failure here must NOT fail the job — the wiki is still valid without RAG.
+    """
+    await _update_job(session, job, status=JobStatus.EMBEDDING.value, progress=90,
+                       step="Indexando código en Qdrant para búsqueda semántica...")
+    try:
+        new_hashes = _compute_file_hashes(code_file_contents)
+        old_hashes: dict[str, str] = repo.file_hashes or {}
+
+        changed_files = {p: c for p, c in code_file_contents.items() if new_hashes[p] != old_hashes.get(p)}
+        deleted_paths = set(old_hashes) - set(new_hashes)
+
+        if not changed_files and not deleted_paths:
+            logger.info("No code files changed since last embed for repo %s; skipping re-embedding.", repo.id)
+            repo.indexed_in_qdrant = True
+        else:
+            # Full reset only on first indexing; subsequent runs remove stale points individually.
+            full_reset = not repo.indexed_in_qdrant
+            files_to_embed = code_file_contents if full_reset else changed_files
+            logger.info(
+                "Embedding %d/%d files for repo %s (full_reset=%s, deleted=%d)",
+                len(files_to_embed), len(code_file_contents), repo.id, full_reset, len(deleted_paths),
+            )
+            await _embed_repository_code(
+                files_to_embed, repo.id,
+                full_reset=full_reset,
+                # Remove changed paths before upserting — old trailing chunks survive when
+                # a changed file becomes shorter.
+                deleted_paths=(deleted_paths | set(changed_files)) if not full_reset else None,
+            )
+            repo.indexed_in_qdrant = True
+
+        repo.file_hashes = new_hashes
+    except Exception:
+        logger.exception("Fallo indexando código en Qdrant para repo %s (job %s); el wiki sigue disponible.",
+                          repo.id, job.id)
+        repo.indexed_in_qdrant = False
+    await session.commit()
 
 
 async def _read_code_files(client: GitLabClient, project_id: str, branch: str, structure) -> dict[str, str]:
