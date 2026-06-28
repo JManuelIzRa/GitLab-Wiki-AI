@@ -4,7 +4,6 @@ import {
   ElementRef,
   Input,
   OnChanges,
-  SimpleChanges,
   inject,
 } from '@angular/core';
 
@@ -31,7 +30,7 @@ export class HighlightedCodeComponent implements OnChanges {
 
   processedLines: { number: number; code: string; style: Record<string, string> }[] = [];
 
-  ngOnChanges(changes: SimpleChanges): void {
+  ngOnChanges(): void {
     this.highlight();
   }
 

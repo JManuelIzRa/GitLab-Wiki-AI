@@ -40,19 +40,6 @@ const initialState: GroupServiceState = {
 
 @Injectable({ providedIn: 'root' })
 export class GroupService {
-  // ---- Readonly signals ----
-  readonly groups = signal<GroupSummary[]>(initialState.groups).asReadonly();
-  readonly groupsLoading = signal<boolean>(initialState.groupsLoading).asReadonly();
-  readonly groupsError = signal<string>(initialState.groupsError).asReadonly();
-
-  readonly activeGroup = signal<GroupDetail | null>(initialState.activeGroup).asReadonly();
-  readonly activeGroupJobId = signal<number | null>(initialState.activeGroupJobId).asReadonly();
-  readonly activeGroupId = signal<number | null>(initialState.activeGroupId).asReadonly();
-  readonly reindexGroupPrefill = signal<GroupSummary | null>(initialState.reindexGroupPrefill).asReadonly();
-
-  readonly groupSubmitError = signal<string>(initialState.groupSubmitError);
-  readonly isGroupSubmitting = signal<boolean>(initialState.isGroupSubmitting).asReadonly();
-
   // ---- Private writable signals ----
   private _groups = signal<GroupSummary[]>(initialState.groups);
   private _groupsLoading = signal<boolean>(initialState.groupsLoading);
@@ -65,6 +52,20 @@ export class GroupService {
 
   private _groupSubmitError = signal<string>(initialState.groupSubmitError);
   private _isGroupSubmitting = signal<boolean>(initialState.isGroupSubmitting);
+
+  // ---- Public signal views ----
+  readonly groups = this._groups.asReadonly();
+  readonly groupsLoading = this._groupsLoading.asReadonly();
+  readonly groupsError = this._groupsError.asReadonly();
+
+  readonly activeGroup = this._activeGroup.asReadonly();
+  readonly activeGroupJobId = this._activeGroupJobId.asReadonly();
+  readonly activeGroupId = this._activeGroupId.asReadonly();
+  readonly reindexGroupPrefill = this._reindexGroupPrefill.asReadonly();
+
+  // Kept writable because the connection form clears it directly.
+  readonly groupSubmitError = this._groupSubmitError;
+  readonly isGroupSubmitting = this._isGroupSubmitting.asReadonly();
 
   // Snapshot for synchronous reads
   private snap: GroupServiceState = { ...initialState };
@@ -150,11 +151,21 @@ export class GroupService {
   // --------------------------------------------------------------------------
 
   async handleDeleteGroup(groupId: number): Promise<void> {
-    await firstValueFrom(this.api.deleteGroup(groupId));
-    await this.offlineCache.clearGroup(groupId);
-    this.setState({
-      groups: this.snap.groups.filter((g) => g.id !== groupId),
-    });
+    this.setState({ groupsError: '' });
+    try {
+      await firstValueFrom(this.api.deleteGroup(groupId));
+      await this.offlineCache.clearGroup(groupId);
+      this.setState({
+        groups: this.snap.groups.filter((g) => g.id !== groupId),
+      });
+    } catch (err) {
+      this.setState({
+        groupsError:
+          (err instanceof Error ? err.message : String(err)) ||
+          'No se pudo eliminar el grupo.',
+      });
+      throw err;
+    }
   }
 
   handleReindexGroup(group: GroupSummary | null): void {

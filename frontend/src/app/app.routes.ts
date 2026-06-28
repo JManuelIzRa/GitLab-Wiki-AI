@@ -31,6 +31,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'wiki/:repoId/:slug',
+    loadComponent: () =>
+      import('./components/wiki-layout/wiki-layout.component').then(
+        (m) => m.WikiLayoutComponent,
+      ),
+  },
+  {
     path: 'wiki/:repoId',
     loadComponent: () =>
       import('./components/wiki-layout/wiki-layout.component').then(
@@ -58,4 +65,5 @@ export const routes: Routes = [
         (m) => m.GroupWikiViewComponent,
       ),
   },
+  { path: '**', redirectTo: '/browse' },
 ];

@@ -8,7 +8,7 @@ import {
   signal,
   inject,
 } from '@angular/core';
-import { MermaidService, MERMAID_DARK_VARS, MERMAID_LIGHT_VARS } from '../../services/mermaid.service';
+import { MermaidService } from '../../services/mermaid.service';
 
 @Component({
   selector: 'app-mermaid-diagram',

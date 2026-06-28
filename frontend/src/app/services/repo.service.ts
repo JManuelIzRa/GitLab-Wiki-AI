@@ -79,31 +79,6 @@ const initialState: RepoServiceState = {
 
 @Injectable({ providedIn: 'root' })
 export class RepoService {
-  // ---- Readonly signals ----
-  readonly repositories = signal<RepositorySummary[]>(initialState.repositories).asReadonly();
-  readonly browseLoading = signal<boolean>(initialState.browseLoading).asReadonly();
-  readonly browseError = signal<string>(initialState.browseError).asReadonly();
-  readonly hasMoreRepos = signal<boolean>(initialState.hasMoreRepos).asReadonly();
-  readonly repoLoadingMore = signal<boolean>(initialState.repoLoadingMore).asReadonly();
-
-  readonly repository = signal<RepositorySummary | null>(initialState.repository).asReadonly();
-  readonly pages = signal<WikiPageSummary[]>(initialState.pages).asReadonly();
-  readonly activeSlug = signal<string | null>(initialState.activeSlug).asReadonly();
-  readonly activePage = signal<WikiPageDetail | null>(initialState.activePage).asReadonly();
-  readonly pageLoading = signal<boolean>(initialState.pageLoading).asReadonly();
-
-  readonly submitError = signal<string>(initialState.submitError);
-  readonly isSubmitting = signal<boolean>(initialState.isSubmitting).asReadonly();
-  readonly activeJobId = signal<number | null>(initialState.activeJobId).asReadonly();
-  readonly projectPathLabel = signal<string>(initialState.projectPathLabel).asReadonly();
-  readonly reindexPrefill = signal<RepositorySummary | null>(initialState.reindexPrefill).asReadonly();
-
-  readonly searchOpen = signal<boolean>(initialState.searchOpen).asReadonly();
-  readonly graphOpen = signal<boolean>(initialState.graphOpen).asReadonly();
-  readonly shortcutsOpen = signal<boolean>(initialState.shortcutsOpen).asReadonly();
-  readonly historyOpen = signal<boolean>(initialState.historyOpen).asReadonly();
-  readonly paletteOpen = signal<boolean>(initialState.paletteOpen).asReadonly();
-
   // ---- Private writable signals (for setState) ----
   private _repositories = signal<RepositorySummary[]>(initialState.repositories);
   private _browseLoading = signal<boolean>(initialState.browseLoading);
@@ -128,6 +103,32 @@ export class RepoService {
   private _shortcutsOpen = signal<boolean>(initialState.shortcutsOpen);
   private _historyOpen = signal<boolean>(initialState.historyOpen);
   private _paletteOpen = signal<boolean>(initialState.paletteOpen);
+
+  // ---- Public signal views ----
+  readonly repositories = this._repositories.asReadonly();
+  readonly browseLoading = this._browseLoading.asReadonly();
+  readonly browseError = this._browseError.asReadonly();
+  readonly hasMoreRepos = this._hasMoreRepos.asReadonly();
+  readonly repoLoadingMore = this._repoLoadingMore.asReadonly();
+
+  readonly repository = this._repository.asReadonly();
+  readonly pages = this._pages.asReadonly();
+  readonly activeSlug = this._activeSlug.asReadonly();
+  readonly activePage = this._activePage.asReadonly();
+  readonly pageLoading = this._pageLoading.asReadonly();
+
+  // Kept writable because connection forms clear validation errors directly.
+  readonly submitError = this._submitError;
+  readonly isSubmitting = this._isSubmitting.asReadonly();
+  readonly activeJobId = this._activeJobId.asReadonly();
+  readonly projectPathLabel = this._projectPathLabel.asReadonly();
+  readonly reindexPrefill = this._reindexPrefill.asReadonly();
+
+  readonly searchOpen = this._searchOpen.asReadonly();
+  readonly graphOpen = this._graphOpen.asReadonly();
+  readonly shortcutsOpen = this._shortcutsOpen.asReadonly();
+  readonly historyOpen = this._historyOpen.asReadonly();
+  readonly paletteOpen = this._paletteOpen.asReadonly();
 
   // Snapshot for synchronous reads
   private snap: RepoServiceState = { ...initialState };
@@ -252,6 +253,7 @@ export class RepoService {
         pageLoading: false,
       });
       localStorage.setItem(STORAGE_LAST_REPO, String(repo.id));
+      this.router.navigate(['/wiki', repo.id, structure.pages[0]?.slug].filter(Boolean));
     } catch (err) {
       this.setState({
         browseError: `Error al abrir "${repo.name}": ${err instanceof Error ? err.message : 'Error desconocido'}`,
@@ -297,25 +299,31 @@ export class RepoService {
   }
 
   /** Load wiki structure by repo ID and set as active (without navigation). */
-  async loadWiki(repoId: number): Promise<void> {
+  async loadWiki(repoId: number, preferredSlug?: string | null): Promise<void> {
     try {
       const structure = await firstValueFrom(this.api.getWikiStructure(repoId));
       await this.offlineCache.setStructure(repoId, structure as any);
       this.setState({
         repository: structure.repository,
         pages: structure.pages,
-        activeSlug: structure.pages[0]?.slug || null,
+        activeSlug:
+          structure.pages.find((page) => page.slug === preferredSlug)?.slug ??
+          structure.pages[0]?.slug ??
+          null,
         activePage: null,
         pageLoading: false,
       });
-    } catch (err) {
+    } catch {
       const cached = await this.offlineCache.getStructure(repoId);
       if (cached) {
         const structure = cached as any as WikiStructureResponse;
         this.setState({
           repository: structure.repository,
           pages: structure.pages,
-          activeSlug: structure.pages[0]?.slug || null,
+          activeSlug:
+            structure.pages.find((page) => page.slug === preferredSlug)?.slug ??
+            structure.pages[0]?.slug ??
+            null,
           activePage: null,
           pageLoading: false,
         });
@@ -330,11 +338,21 @@ export class RepoService {
   // --------------------------------------------------------------------------
 
   async handleDeleteRepository(repoId: number): Promise<void> {
-    await firstValueFrom(this.api.deleteRepository(repoId));
-    await this.offlineCache.clearRepo(repoId);
-    this.setState({
-      repositories: this.snap.repositories.filter((r) => r.id !== repoId),
-    });
+    this.setState({ browseError: '' });
+    try {
+      await firstValueFrom(this.api.deleteRepository(repoId));
+      await this.offlineCache.clearRepo(repoId);
+      this.setState({
+        repositories: this.snap.repositories.filter((r) => r.id !== repoId),
+      });
+    } catch (err) {
+      this.setState({
+        browseError:
+          (err instanceof Error ? err.message : String(err)) ||
+          'No se pudo eliminar el repositorio.',
+      });
+      throw err;
+    }
   }
 
   handleReindexRepository(repo: RepositorySummary | null): void {

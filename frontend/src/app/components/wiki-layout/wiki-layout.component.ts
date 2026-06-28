@@ -94,22 +94,35 @@ export class WikiLayoutComponent implements OnInit, OnDestroy {
   ];
 
   ngOnInit(): void {
-    // Watch repoId route param changes → load wiki
+    // Route params are the source of truth for refreshes and browser back/forward.
     this.paramSub = this.route.paramMap.subscribe((params) => {
       const repoId = Number(params.get('repoId'));
+      const slug = params.get('slug');
       if (repoId) {
-        this.repoService.loadWiki(repoId);
+        const currentRepo = this.repoService.repository();
+        const pages = this.repoService.pages();
+        if (currentRepo?.id === repoId && pages.length > 0) {
+          if (slug && pages.some((page) => page.slug === slug)) {
+            this.repoService.setActiveSlug(slug);
+          }
+          return;
+        }
+        void this.repoService.loadWiki(repoId, slug);
       }
     });
 
-    // Watch activeSlug changes via effect → load page content
+    // Keep page content and the shareable URL synchronized with service state.
     this.loadEffect = effect(() => {
-      // Access signals to register dependency
-      void this.repoService.activeSlug();
-      void this.repoService.repository();
       const repo = this.repoService.repository();
-      if (repo) {
-        this.repoService.loadActivePage();
+      const slug = this.repoService.activeSlug();
+      if (repo && slug) {
+        const routeSlug = this.route.snapshot.paramMap.get('slug');
+        if (routeSlug !== slug) {
+          void this.router.navigate(['/wiki', repo.id, slug], {
+            replaceUrl: !routeSlug,
+          });
+        }
+        void this.repoService.loadActivePage();
       }
     });
   }

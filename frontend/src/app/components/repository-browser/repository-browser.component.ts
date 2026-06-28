@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, computed, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { RepoService } from '../../services/repo.service';
 import { GroupService } from '../../services/group.service';
@@ -15,6 +15,21 @@ import type { RepositorySummary } from '../../services/api.service';
 export class RepositoryBrowserComponent implements OnInit {
   tab = signal<'repos' | 'groups'>('repos');
   deletingId = signal<number | null>(null);
+  searchQuery = signal('');
+
+  filteredRepositories = computed(() => {
+    const query = this.searchQuery().trim().toLowerCase();
+    const repos = this.repoService.repositories();
+    if (!query) return repos;
+    return repos.filter((repo) =>
+      [repo.name, repo.project_path, repo.description, repo.default_branch]
+        .some((value) => value?.toLowerCase().includes(query)),
+    );
+  });
+
+  semanticRepositoryCount = computed(() =>
+    this.repoService.repositories().filter((repo) => repo.indexed_in_qdrant).length,
+  );
 
   constructor(
     public repoService: RepoService,
@@ -31,13 +46,18 @@ export class RepositoryBrowserComponent implements OnInit {
     this.repoService.openExistingRepository(repo);
   }
 
-  handleDelete(event: Event, repoId: number): void {
+  async handleDelete(event: Event, repoId: number): Promise<void> {
     event.stopPropagation();
     if (this.deletingId() !== null) return;
     if (!window.confirm('¿Eliminar este repositorio indexado y su wiki local?')) return;
     this.deletingId.set(repoId);
-    this.repoService.handleDeleteRepository(repoId);
-    this.deletingId.set(null);
+    try {
+      await this.repoService.handleDeleteRepository(repoId);
+    } catch {
+      // The service exposes the actionable error in the dashboard.
+    } finally {
+      this.deletingId.set(null);
+    }
   }
 
   handleReindex(event: Event, repo: RepositorySummary): void {
@@ -64,7 +84,16 @@ export class RepositoryBrowserComponent implements OnInit {
     this.tab.set(value);
   }
 
-  reloadPage(): void {
-    window.location.reload();
+  retryRepositories(): void {
+    this.repoService.loadRepositories();
+  }
+
+  formatUpdatedAt(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'fecha desconocida';
+    return new Intl.RelativeTimeFormat('es', { numeric: 'auto' }).format(
+      Math.round((date.getTime() - Date.now()) / 86_400_000),
+      'day',
+    );
   }
 }
