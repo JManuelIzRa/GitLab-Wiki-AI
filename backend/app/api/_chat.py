@@ -1,4 +1,5 @@
 """Code search and RAG chat endpoints (per-repository)."""
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,11 @@ from app.core.rate_limit import limiter
 from app.db.session import get_session
 from app.models.db_models import Repository, WikiPage
 from app.models.schemas import (
-    ChatHistoryMessage, ChatRequest, ChatResponse, CodeSearchRequest, CodeSearchResponse, CodeSource,
+    ChatRequest,
+    ChatResponse,
+    CodeSearchRequest,
+    CodeSearchResponse,
+    CodeSource,
 )
 from app.services.embedding_client import EmbeddingError, get_embedding_client
 from app.services.vector_store import VectorStore
@@ -41,15 +46,10 @@ def _build_wiki_summary(question: str, page_rows: list, budget: int = 4000) -> s
         if not q_words:
             return 0
         title_l = title.lower()
-        headings_l = " ".join(
-            line.lstrip("#").strip() for line in content.split("\n") if line.startswith("#")
-        ).lower()
+        headings_l = " ".join(line.lstrip("#").strip() for line in content.split("\n") if line.startswith("#")).lower()
         preview_l = content[:500].lower()
         body_l = content[500:3000].lower()
-        return sum(
-            5 * (w in title_l) + 3 * (w in headings_l) + 2 * (w in preview_l) + (w in body_l)
-            for w in q_words
-        )
+        return sum(5 * (w in title_l) + 3 * (w in headings_l) + 2 * (w in preview_l) + (w in body_l) for w in q_words)
 
     ranked = sorted(page_rows, key=lambda r: relevance(r[0], r[1]), reverse=True)
 
@@ -70,6 +70,7 @@ def _build_wiki_summary(question: str, page_rows: list, budget: int = 4000) -> s
 # ---------------------------------------------------------------------------
 # Semantic code search
 # ---------------------------------------------------------------------------
+
 
 @router.post("/repositories/{repo_id}/search", response_model=CodeSearchResponse)
 async def search_code(
@@ -98,18 +99,24 @@ async def search_code(
     finally:
         await vector_store.close()
 
-    return CodeSearchResponse(results=[
-        CodeSource(
-            file_path=c.file_path, start_line=c.start_line, end_line=c.end_line,
-            content=c.content, score=c.score,
-        )
-        for c in chunks
-    ])
+    return CodeSearchResponse(
+        results=[
+            CodeSource(
+                file_path=c.file_path,
+                start_line=c.start_line,
+                end_line=c.end_line,
+                content=c.content,
+                score=c.score,
+            )
+            for c in chunks
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
 # RAG chat — non-streaming
 # ---------------------------------------------------------------------------
+
 
 @router.post("/repositories/{repo_id}/chat", response_model=ChatResponse)
 @limiter.limit(settings.rate_limit_chat)
@@ -173,20 +180,22 @@ async def chat_with_repo(
 
     sources = [
         CodeSource(
-            file_path=c.file_path, start_line=c.start_line, end_line=c.end_line,
-            content=c.content, score=c.score,
+            file_path=c.file_path,
+            start_line=c.start_line,
+            end_line=c.end_line,
+            content=c.content,
+            score=c.score,
         )
         for c in retrieved_chunks
     ]
-    await db_cache_set(
-        session, repo_id, payload.question, answer, [s.model_dump() for s in sources], history
-    )
+    await db_cache_set(session, repo_id, payload.question, answer, [s.model_dump() for s in sources], history)
     return ChatResponse(answer=answer, sources=sources)
 
 
 # ---------------------------------------------------------------------------
 # RAG chat — streaming SSE
 # ---------------------------------------------------------------------------
+
 
 @router.post("/repositories/{repo_id}/chat/stream")
 @limiter.limit(settings.rate_limit_chat)
@@ -230,8 +239,11 @@ async def stream_chat_with_repo(
 
     sources = [
         CodeSource(
-            file_path=c.file_path, start_line=c.start_line, end_line=c.end_line,
-            content=c.content, score=c.score,
+            file_path=c.file_path,
+            start_line=c.start_line,
+            end_line=c.end_line,
+            content=c.content,
+            score=c.score,
         )
         for c in retrieved_chunks
     ]

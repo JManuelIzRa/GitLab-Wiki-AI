@@ -1,8 +1,11 @@
 """Tests for wiki_exporter.export_wiki_to_markdown using plain SimpleNamespace objects."""
+
 import sys
+
 sys.path.insert(0, ".")
 
 from types import SimpleNamespace
+
 from app.services.wiki_exporter import export_wiki_to_markdown
 
 _REPO = SimpleNamespace(
@@ -15,17 +18,20 @@ _REPO = SimpleNamespace(
 
 _PAGES = [
     SimpleNamespace(
-        title="Overview", parent_slug="",
+        title="Overview",
+        parent_slug="",
         content_markdown="## Resumen\nEsto es un proyecto demo.",
         source_files=["README.md"],
     ),
     SimpleNamespace(
-        title="Arquitectura", parent_slug="",
+        title="Arquitectura",
+        parent_slug="",
         content_markdown="## Arquitectura\nPatrón router-controller.",
         source_files=[],
     ),
     SimpleNamespace(
-        title="Módulo: src", parent_slug="modules",
+        title="Módulo: src",
+        parent_slug="modules",
         content_markdown="## Módulo src\nContiene el entrypoint.",
         source_files=["src/index.js"],
     ),

@@ -17,7 +17,7 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "- Si necesitas representar un flujo o arquitectura, usa un bloque ```mermaid``` con un diagrama válido "
             "(flowchart, sequenceDiagram o classDiagram). Reglas de sintaxis Mermaid obligatorias:\n"
             "  · Los IDs de nodo solo admiten letras, dígitos y guiones bajos — nunca espacios, puntos, barras ni paréntesis.\n"
-            "  · Las etiquetas con espacios o caracteres especiales DEBEN ir entre comillas dobles: A[\"Mi Módulo\"].\n"
+            '  · Las etiquetas con espacios o caracteres especiales DEBEN ir entre comillas dobles: A["Mi Módulo"].\n'
             "  · Nunca uses () en el ID de un nodo — Mermaid los interpreta como formas de estadio.\n"
             "  · Máximo 14 nodos por diagrama. Usa subgraph para agrupar capas (frontend, backend, db…).\n"
             "  · Prefiere flowchart TD para arquitecturas jerárquicas y flowchart LR para pipelines lineales.\n"
@@ -39,7 +39,7 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "- No repitas el contexto completo, sintetiza la respuesta."
         ),
         "overview": (
-            "Genera la página \"Overview\" del wiki para el proyecto `{project_name}`.\n\n"
+            'Genera la página "Overview" del wiki para el proyecto `{project_name}`.\n\n'
             "Contexto estructural:\n"
             "- Total de archivos indexados: {total_files}\n"
             "- Lenguajes detectados: {lang_summary}\n"
@@ -49,10 +49,10 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "{readme}\n\n"
             "Escribe una página de overview que explique: qué es el proyecto, su propósito principal, "
             "el stack tecnológico, y una visión general de alto nivel de cómo está organizado. "
-            "Incluye una sección \"## Stack tecnológico\" con el lenguaje/framework detectado."
+            'Incluye una sección "## Stack tecnológico" con el lenguaje/framework detectado.'
         ),
         "architecture": (
-            "Genera la página \"Arquitectura\" del wiki para el proyecto `{project_name}`.\n\n"
+            'Genera la página "Arquitectura" del wiki para el proyecto `{project_name}`.\n\n'
             "Módulos/directorios principales detectados (por heurística de carpetas):\n"
             "{modules_desc}\n\n"
             "Puntos de entrada probables: {entrypoints}\n\n"
@@ -74,7 +74,7 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "nómbralas explícitamente y explica su rol."
         ),
         "setup": (
-            "Genera la página \"Cómo ejecutar el proyecto\" del wiki para `{project_name}`.\n\n"
+            'Genera la página "Cómo ejecutar el proyecto" del wiki para `{project_name}`.\n\n'
             "Gestores de dependencias detectados: {package_managers}\n"
             "Archivos de configuración (Docker/CI): {config_files}\n\n"
             "Contenido de los manifiestos de dependencias encontrados:\n"
@@ -94,7 +94,7 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "Pregunta del usuario: {question}"
         ),
         "group_overview": (
-            "Genera la página \"Overview del Grupo\" para el grupo GitLab `{group_name}`.\n\n"
+            'Genera la página "Overview del Grupo" para el grupo GitLab `{group_name}`.\n\n'
             "El grupo contiene {repo_count} repositorios. A continuación un resumen de cada uno:\n\n"
             "{repo_summaries}\n\n"
             "Escribe una página de overview del grupo que explique: el propósito general del grupo, "
@@ -123,7 +123,7 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "- If you need to represent a flow or architecture, use a ```mermaid``` block with a valid diagram "
             "(flowchart, sequenceDiagram, or classDiagram). Mandatory Mermaid syntax rules:\n"
             "  · Node IDs must use only letters, digits, and underscores — no spaces, dots, slashes, hyphens, or parentheses.\n"
-            "  · Labels with spaces or special characters MUST be quoted: A[\"My Module\"].\n"
+            '  · Labels with spaces or special characters MUST be quoted: A["My Module"].\n'
             "  · Never use () in a node ID — Mermaid interprets them as stadium shapes.\n"
             "  · Keep diagrams concise: maximum 14 nodes. Use subgraph to group layers (frontend, backend, db…).\n"
             "  · Prefer flowchart TD for hierarchical architectures and flowchart LR for linear pipelines.\n"
@@ -145,7 +145,7 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "- Do not repeat the full context; synthesize the answer."
         ),
         "overview": (
-            "Generate the \"Overview\" wiki page for project `{project_name}`.\n\n"
+            'Generate the "Overview" wiki page for project `{project_name}`.\n\n'
             "Structural context:\n"
             "- Total indexed files: {total_files}\n"
             "- Detected languages: {lang_summary}\n"
@@ -155,10 +155,10 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "{readme}\n\n"
             "Write an overview page explaining: what the project is, its main purpose, "
             "the technology stack, and a high-level view of how it is organized. "
-            "Include a \"## Tech Stack\" section with the detected language/framework."
+            'Include a "## Tech Stack" section with the detected language/framework.'
         ),
         "architecture": (
-            "Generate the \"Architecture\" wiki page for project `{project_name}`.\n\n"
+            'Generate the "Architecture" wiki page for project `{project_name}`.\n\n'
             "Main modules/directories detected (by folder heuristic):\n"
             "{modules_desc}\n\n"
             "Likely entry points: {entrypoints}\n\n"
@@ -180,7 +180,7 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "name them explicitly and explain their role."
         ),
         "setup": (
-            "Generate the \"How to run the project\" wiki page for `{project_name}`.\n\n"
+            'Generate the "How to run the project" wiki page for `{project_name}`.\n\n'
             "Detected package managers: {package_managers}\n"
             "Configuration files (Docker/CI): {config_files}\n\n"
             "Contents of detected dependency manifests:\n"
@@ -200,7 +200,7 @@ _PROMPTS: dict[str, dict[str, str]] = {
             "User question: {question}"
         ),
         "group_overview": (
-            "Generate the \"Group Overview\" page for GitLab group `{group_name}`.\n\n"
+            'Generate the "Group Overview" page for GitLab group `{group_name}`.\n\n'
             "The group contains {repo_count} repositories. Below is a summary of each:\n\n"
             "{repo_summaries}\n\n"
             "Write a group overview page explaining: the group's overall purpose, "
@@ -230,12 +230,8 @@ def get_prompts(language: str) -> dict[str, str]:
     # Unknown language: use English prompts but override the language instruction.
     lang_name = lang.capitalize()
     prompts = dict(_PROMPTS["en"])
-    prompts["system"] = prompts["system"].replace(
-        "Always respond in English", f"Always respond in {lang_name}"
-    )
+    prompts["system"] = prompts["system"].replace("Always respond in English", f"Always respond in {lang_name}")
     prompts["chat_system"] = prompts["chat_system"].replace(
         "Always respond in English", f"Always respond in {lang_name}"
     )
     return prompts
-
-

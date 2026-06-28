@@ -4,7 +4,7 @@ Thanks for helping improve GitLab Wiki AI.
 
 ## Development setup
 
-1. Install Python 3.11+, [uv](https://docs.astral.sh/uv/), and Node.js 20+.
+1. Install Python 3.11+, [uv](https://docs.astral.sh/uv/), and Node.js 20.19+, 22.13+, or 24+.
 2. Run `uv sync --dev` from `backend/`.
 3. Run `npm ci` from `frontend/`.
 4. Copy the `.env.example` files only when you need to run the services locally.
@@ -15,6 +15,8 @@ Run the same checks as CI:
 
 ```bash
 cd backend
+uv run ruff check app tests
+uv run ruff format --check app tests
 uv run pytest tests/ -x -q
 
 cd ../frontend

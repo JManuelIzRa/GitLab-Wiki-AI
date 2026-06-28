@@ -9,6 +9,7 @@ Fallback a regex cuando el parser no está disponible.
 El grafo resultante es a nivel de MÓDULO (primer directorio del path), no de archivo
 individual — un grafo de cientos de archivos sería ilegible; uno de 5-15 módulos es útil.
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,17 +66,21 @@ def _get_ts_parser(ts_lang_name: str):
 
         if ts_lang_name == "python":
             import tree_sitter_python
+
             lang = Language(tree_sitter_python.language())
         elif ts_lang_name == "javascript":
             import tree_sitter_javascript
+
             lang = Language(tree_sitter_javascript.language())
         elif ts_lang_name == "typescript":
             import tree_sitter_typescript
+
             lang = Language(tree_sitter_typescript.language_typescript())
         else:
             # Try tree-sitter-language-pack for the remaining languages
             try:
                 from tree_sitter_language_pack import get_language
+
                 lang = get_language(ts_lang_name)
             except Exception:
                 lang = None
@@ -92,6 +97,7 @@ def _get_ts_parser(ts_lang_name: str):
 # ---------------------------------------------------------------------------
 # AST-based import extractors (Python, JS/TS)
 # ---------------------------------------------------------------------------
+
 
 def _extract_python_imports(root_node) -> list[str]:
     results: list[str] = []
@@ -178,17 +184,24 @@ def _extract_generic_imports_from_ast(root_node, language: str) -> list[str]:
     Falls back to [] if we can't identify useful node types.
     """
     results: list[str] = []
-    _TEXT = {"string", "string_literal", "interpreted_string_literal",
-              "raw_string_literal", "identifier", "scoped_identifier", "dotted_name"}
+    _TEXT = {
+        "string",
+        "string_literal",
+        "interpreted_string_literal",
+        "raw_string_literal",
+        "identifier",
+        "scoped_identifier",
+        "dotted_name",
+    }
 
     # Node types that carry import semantics in various languages
     _IMPORT_NODES = {
-        "use_declaration",         # Rust
-        "import_declaration",      # Go, Java
-        "import_statement",        # Java (alt)
-        "require",                 # Ruby call
-        "call",                    # Ruby require / require_relative call
-        "use_statement",           # PHP
+        "use_declaration",  # Rust
+        "import_declaration",  # Go, Java
+        "import_statement",  # Java (alt)
+        "require",  # Ruby call
+        "call",  # Ruby require / require_relative call
+        "use_statement",  # PHP
         "namespace_use_declaration",  # PHP
     }
 
@@ -208,6 +221,7 @@ def _extract_generic_imports_from_ast(root_node, language: str) -> list[str]:
 # Graph data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ModuleEdge:
     source: str
@@ -224,6 +238,7 @@ class DependencyGraph:
 # ---------------------------------------------------------------------------
 # Module-depth heuristic
 # ---------------------------------------------------------------------------
+
 
 def _compute_module_depth(known_paths: set[str]) -> int:
     """Use 2 path segments when all code lives under a single top-level dir."""
@@ -244,6 +259,7 @@ def _module_of(path: str, depth: int = 1) -> str:
 # Import resolution helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_relative_import(importer_path: str, import_target: str) -> str | None:
     importer_dir = os.path.dirname(importer_path)
     resolved = os.path.normpath(os.path.join(importer_dir, import_target))
@@ -252,9 +268,7 @@ def _resolve_relative_import(importer_path: str, import_target: str) -> str | No
     return resolved.replace("\\", "/")
 
 
-def _resolve_to_known_paths(
-    raw_targets: list[str], language: str, file_path: str, known_paths: set[str]
-) -> list[str]:
+def _resolve_to_known_paths(raw_targets: list[str], language: str, file_path: str, known_paths: set[str]) -> list[str]:
     matched: list[str] = []
 
     for raw in raw_targets:
@@ -265,9 +279,13 @@ def _resolve_to_known_paths(
             if resolved is None:
                 continue
             candidates = [
-                resolved, resolved + ".js", resolved + ".ts",
-                resolved + ".jsx", resolved + ".tsx",
-                resolved + "/index.js", resolved + "/index.ts",
+                resolved,
+                resolved + ".js",
+                resolved + ".ts",
+                resolved + ".jsx",
+                resolved + ".tsx",
+                resolved + "/index.js",
+                resolved + "/index.ts",
             ]
             hit = next((c for c in candidates if c in known_paths), None)
             if hit:
@@ -339,9 +357,8 @@ def _resolve_to_known_paths(
 # Per-file import detection (AST + regex fallback)
 # ---------------------------------------------------------------------------
 
-def _detect_internal_imports(
-    file_path: str, content: str, language: str, known_paths: set[str]
-) -> list[str]:
+
+def _detect_internal_imports(file_path: str, content: str, language: str, known_paths: set[str]) -> list[str]:
     raw_targets: list[str] = []
     used_tree_sitter = False
 
@@ -373,9 +390,8 @@ def _detect_internal_imports(
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def build_dependency_graph(
-    file_contents: dict[str, str], languages_by_path: dict[str, str]
-) -> DependencyGraph:
+
+def build_dependency_graph(file_contents: dict[str, str], languages_by_path: dict[str, str]) -> DependencyGraph:
     """
     file_contents: {path: content} of already-fetched code files.
     languages_by_path: {path: language name} (e.g. "Python"), to select the right parser.

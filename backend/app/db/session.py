@@ -1,6 +1,7 @@
 """
 Configuración del motor async de SQLAlchemy y utilidades de sesión.
 """
+
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import event, text
@@ -19,6 +20,8 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+
+
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 # DDL statements applied on startup. Use IF NOT EXISTS / IF EXISTS where possible

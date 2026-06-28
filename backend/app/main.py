@@ -9,10 +9,11 @@ Variables de entorno clave (ver .env.example):
     EMBEDDING_URL       URL del servicio de embeddings
     QDRANT_HOST         Host del servidor Qdrant
 """
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import FastAPI
@@ -34,9 +35,7 @@ from app.services.wiki_generator import WikiGenerator
 
 def _setup_logging() -> None:
     handler = logging.StreamHandler()
-    handler.setFormatter(
-        jsonlogger.JsonFormatter(fmt="%(asctime)s %(levelname)s %(name)s %(message)s")
-    )
+    handler.setFormatter(jsonlogger.JsonFormatter(fmt="%(asctime)s %(levelname)s %(name)s %(message)s"))
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(logging.INFO)
@@ -60,9 +59,10 @@ async def _warn_unreachable_services() -> None:
                 await client.get(url)
             except Exception as exc:
                 logger.warning(
-                    "Service '%s' at %s is not reachable: %s — "
-                    "dependent features will be degraded until it comes up.",
-                    name, url, exc,
+                    "Service '%s' at %s is not reachable: %s — dependent features will be degraded until it comes up.",
+                    name,
+                    url,
+                    exc,
                 )
 
 
@@ -78,32 +78,37 @@ async def _staleness_reindex_loop() -> None:
         threshold = datetime.now(timezone.utc) - timedelta(hours=settings.reindex_staleness_hours)
         try:
             async with AsyncSessionLocal() as session:
-                stale = (await session.execute(
-                    select(Repository).where(Repository.updated_at < threshold)
-                )).scalars().all()
+                stale = (
+                    (await session.execute(select(Repository).where(Repository.updated_at < threshold))).scalars().all()
+                )
                 for repo in stale:
                     token = repo.gitlab_token or settings.gitlab_default_token
                     if not token:
                         continue
-                    active = (await session.execute(
-                        select(IndexJob).where(
-                            IndexJob.repository_id == repo.id,
-                            IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
-                        ).limit(1)
-                    )).scalar()
+                    active = (
+                        await session.execute(
+                            select(IndexJob)
+                            .where(
+                                IndexJob.repository_id == repo.id,
+                                IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
+                            )
+                            .limit(1)
+                        )
+                    ).scalar()
                     if active:
                         continue
                     job = IndexJob(
-                        repository_id=repo.id, status=JobStatus.PENDING.value, progress=0,
+                        repository_id=repo.id,
+                        status=JobStatus.PENDING.value,
+                        progress=0,
                         current_step="Re-indexado automático por contenido desactualizado...",
                     )
                     session.add(job)
                     await session.commit()
                     await session.refresh(job)
                     from app.services.indexer import run_index_job
-                    asyncio.create_task(
-                        run_index_job(job.id, repo.gitlab_url, repo.project_path, token, None, False)
-                    )
+
+                    asyncio.create_task(run_index_job(job.id, repo.gitlab_url, repo.project_path, token, None, False))
                     logger.info("Staleness re-index queued for repo %s (%s)", repo.id, repo.project_path)
         except Exception:
             logger.exception("Staleness re-index loop encountered an error; will retry in 1h.")

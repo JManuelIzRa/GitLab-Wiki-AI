@@ -15,6 +15,7 @@ Language support: set WIKI_LANGUAGE in config (ISO code, e.g. "es", "en").
 Full ES and EN prompt sets live in ``wiki_prompts``; other codes get EN prompts
 with the target language injected into the system instruction.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +29,7 @@ import openai
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-from app.services.structure_analyzer import RepoStructure, ModuleInfo
+from app.services.structure_analyzer import ModuleInfo, RepoStructure
 from app.services.vector_store import RetrievedChunk
 from app.services.wiki_prompts import get_prompts
 
@@ -43,6 +44,7 @@ class FileSnippet:
 
 def _sanitize_mermaid_blocks(content: str) -> str:
     """Post-process LLM output to fix the most common Mermaid syntax errors in generated blocks."""
+
     def _fix(m: re.Match) -> str:
         code = m.group(1)
         # Strip any nested backtick fences the LLM accidentally inserts
@@ -50,12 +52,13 @@ def _sanitize_mermaid_blocks(content: str) -> str:
         # Normalize line endings
         code = code.replace("\r\n", "\n").replace("\r", "\n")
         # Decode common HTML entities that break the Mermaid parser
-        code = (code
-                .replace("&amp;", "&")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&quot;", '"')
-                .replace("&#39;", "'"))
+        code = (
+            code.replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", '"')
+            .replace("&#39;", "'")
+        )
         return f"```mermaid\n{code.strip()}\n```"
 
     return re.sub(r"```mermaid\n(.*?)```", _fix, content, flags=re.DOTALL)
@@ -90,8 +93,7 @@ def _format_retrieved_chunks(chunks: list[RetrievedChunk]) -> str:
     parts = []
     for c in chunks:
         parts.append(
-            f"### `{c.file_path}` (lines {c.start_line}-{c.end_line}, score {c.score:.2f})\n"
-            f"```\n{c.content}\n```"
+            f"### `{c.file_path}` (lines {c.start_line}-{c.end_line}, score {c.score:.2f})\n```\n{c.content}\n```"
         )
     return "\n\n".join(parts)
 
@@ -142,7 +144,8 @@ class WikiGenerator:
         if len(user_prompt) > user_budget:
             logger.warning(
                 "User prompt (%d chars) exceeds budget (%d); truncating before LLM call.",
-                len(user_prompt), user_budget,
+                len(user_prompt),
+                user_budget,
             )
             user_prompt = user_prompt[:user_budget] + "\n... [truncated] ..."
 
@@ -164,7 +167,9 @@ class WikiGenerator:
                 if usage:
                     logger.debug(
                         "LLM token usage: prompt=%d completion=%d total=%d",
-                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens,
+                        usage.prompt_tokens,
+                        usage.completion_tokens,
+                        usage.total_tokens,
                     )
                 return response.choices[0].message.content or ""
             except openai.RateLimitError as exc:
@@ -174,7 +179,7 @@ class WikiGenerator:
                 await asyncio.sleep(wait)
             except _retryable as exc:
                 last_exc = exc
-                wait = 2 ** attempt
+                wait = 2**attempt
                 logger.warning("LLM request failed (attempt %d/4): %s — retrying in %ds", attempt + 1, exc, wait)
                 await asyncio.sleep(wait)
         raise last_exc  # type: ignore[misc]
@@ -184,7 +189,10 @@ class WikiGenerator:
     # ------------------------------------------------------------------
 
     async def generate_overview(
-        self, project_name: str, structure: RepoStructure, readme_content: str | None,
+        self,
+        project_name: str,
+        structure: RepoStructure,
+        readme_content: str | None,
         system_prompt_override: str | None = None,
     ) -> str:
         lang_summary = ", ".join(f"{lang} ({count} files)" for lang, count in list(structure.languages.items())[:8])
@@ -199,7 +207,9 @@ class WikiGenerator:
         return _sanitize_mermaid_blocks(await self._ask(prompt, system_prompt_override=system_prompt_override))
 
     async def generate_architecture(
-        self, project_name: str, structure: RepoStructure,
+        self,
+        project_name: str,
+        structure: RepoStructure,
         system_prompt_override: str | None = None,
     ) -> str:
         modules_desc = "\n".join(
@@ -217,7 +227,10 @@ class WikiGenerator:
         return _sanitize_mermaid_blocks(await self._ask(prompt, system_prompt_override=system_prompt_override))
 
     async def generate_module_page(
-        self, project_name: str, module: ModuleInfo, snippets: list[FileSnippet],
+        self,
+        project_name: str,
+        module: ModuleInfo,
+        snippets: list[FileSnippet],
         system_prompt_override: str | None = None,
     ) -> str:
         files_context = _budget_snippets(snippets, settings.max_chars_per_ai_call)
@@ -262,7 +275,8 @@ class WikiGenerator:
         code_context = _format_retrieved_chunks(retrieved_chunks)
         wiki_block = (
             f"--- WIKI SUMMARY ---\n{_truncate(wiki_summary, _WIKI_SUMMARY_BUDGET_CHARS)}\n--- END WIKI SUMMARY ---\n\n"
-            if wiki_summary else ""
+            if wiki_summary
+            else ""
         )
         return self._p["rag_context"].format(
             project_name=project_name,
@@ -312,9 +326,10 @@ class WikiGenerator:
             except _retryable as exc:
                 last_exc = exc
                 if attempt < 2:
-                    wait = 2 ** attempt
-                    logger.warning("Streaming connection failed (attempt %d/3): %s — retrying in %ds",
-                                   attempt + 1, exc, wait)
+                    wait = 2**attempt
+                    logger.warning(
+                        "Streaming connection failed (attempt %d/3): %s — retrying in %ds", attempt + 1, exc, wait
+                    )
                     await asyncio.sleep(wait)
         if stream is None:
             raise last_exc  # type: ignore[misc]
@@ -340,14 +355,11 @@ class WikiGenerator:
         summaries_text = ""
         for rs in repo_summaries:
             pages_text = "\n".join(
-                f"  - **{p['title']}**: {p['content'][:200].strip()}"
-                for p in rs.get("pages", [])[:4]
+                f"  - **{p['title']}**: {p['content'][:200].strip()}" for p in rs.get("pages", [])[:4]
             )
-            summaries_text += (
-                f"### {rs['name']} (`{rs['path']}`)\n{pages_text or '(no wiki pages yet)'}\n\n"
-            )
+            summaries_text += f"### {rs['name']} (`{rs['path']}`)\n{pages_text or '(no wiki pages yet)'}\n\n"
 
-        prompt = self._p.get("group_overview", _PROMPTS["en"]["group_overview"]).format(
+        prompt = self._p["group_overview"].format(
             group_name=group_name,
             repo_count=len(repo_summaries),
             repo_summaries=summaries_text or "(no repos with generated wikis yet)",
@@ -365,9 +377,10 @@ class WikiGenerator:
         code_context = _format_retrieved_chunks(retrieved_chunks)
         wiki_block = (
             f"--- GROUP WIKI SUMMARY ---\n{_truncate(group_wiki_summary, _GROUP_WIKI_SUMMARY_BUDGET_CHARS)}\n--- END ---\n\n"
-            if group_wiki_summary else ""
+            if group_wiki_summary
+            else ""
         )
-        template = self._p.get("group_chat_context", _PROMPTS["en"]["group_chat_context"])
+        template = self._p["group_chat_context"]
         prompt = template.format(
             group_name=group_name,
             repo_list=", ".join(repo_names) or "(none)",
@@ -388,9 +401,10 @@ class WikiGenerator:
         code_context = _format_retrieved_chunks(retrieved_chunks)
         wiki_block = (
             f"--- GROUP WIKI SUMMARY ---\n{_truncate(group_wiki_summary, _GROUP_WIKI_SUMMARY_BUDGET_CHARS)}\n--- END ---\n\n"
-            if group_wiki_summary else ""
+            if group_wiki_summary
+            else ""
         )
-        template = self._p.get("group_chat_context", _PROMPTS["en"]["group_chat_context"])
+        template = self._p["group_chat_context"]
         prompt = template.format(
             group_name=group_name,
             repo_list=", ".join(repo_names) or "(none)",
@@ -417,7 +431,7 @@ class WikiGenerator:
             except _retryable as exc:
                 last_exc = exc
                 if attempt < 2:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
         if stream is None:
             raise last_exc  # type: ignore[misc]
         async for chunk in stream:

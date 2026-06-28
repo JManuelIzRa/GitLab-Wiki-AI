@@ -2,19 +2,31 @@
 Esquemas Pydantic usados en la API (request/response).
 Separados de los modelos de DB para no acoplar el contrato HTTP al esquema de tablas.
 """
+
 import re
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 # ---------- Requests ----------
 
+
 class IndexRepositoryRequest(BaseModel):
-    gitlab_url: str = Field(..., min_length=1, max_length=512, description="URL base de la instancia GitLab, ej. https://gitlab.com")
-    project_path: str = Field(..., min_length=1, max_length=512, description="Ruta del proyecto, ej. mi-grupo/mi-proyecto")
-    private_token: str = Field(..., min_length=1, max_length=512, description="Personal Access Token de GitLab (scope: read_api, read_repository)")
-    branch: str | None = Field(default=None, max_length=255, description="Branch a indexar; si se omite usa el default del repo")
+    gitlab_url: str = Field(
+        ..., min_length=1, max_length=512, description="URL base de la instancia GitLab, ej. https://gitlab.com"
+    )
+    project_path: str = Field(
+        ..., min_length=1, max_length=512, description="Ruta del proyecto, ej. mi-grupo/mi-proyecto"
+    )
+    private_token: str = Field(
+        ...,
+        min_length=1,
+        max_length=512,
+        description="Personal Access Token de GitLab (scope: read_api, read_repository)",
+    )
+    branch: str | None = Field(
+        default=None, max_length=255, description="Branch a indexar; si se omite usa el default del repo"
+    )
     force_reindex: bool = Field(
         default=False,
         description="Si True, regenera el wiki aunque el commit no haya cambiado desde el último indexado",
@@ -48,16 +60,22 @@ class ChatRequest(BaseModel):
 
 
 class CodeSearchRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=500, description="Texto a buscar semánticamente en el código del repo")
-    top_k: int | None = Field(default=None, ge=1, le=50, description="Número de resultados a devolver; usa el default del backend si se omite")
+    query: str = Field(
+        ..., min_length=1, max_length=500, description="Texto a buscar semánticamente en el código del repo"
+    )
+    top_k: int | None = Field(
+        default=None, ge=1, le=50, description="Número de resultados a devolver; usa el default del backend si se omite"
+    )
 
 
 class PushToGitLabWikiRequest(BaseModel):
     """Credentials needed to push the generated wiki to GitLab's built-in wiki."""
+
     private_token: str = Field(..., min_length=1, max_length=512, description="PAT with api or write_wiki scope")
 
 
 # ---------- Responses ----------
+
 
 class IndexJobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -151,6 +169,7 @@ class WikiStructureResponse(BaseModel):
 
 class CodeSource(BaseModel):
     """Un fragmento de código real usado como contexto para generar una respuesta del chat."""
+
     file_path: str
     start_line: int
     end_line: int
@@ -193,27 +212,32 @@ class RepoWebhookSecretUpdate(BaseModel):
 
 class RepoGitLabTokenUpdate(BaseModel):
     """Store a PAT so webhook-triggered re-indexing works without a global default token."""
+
     gitlab_token: str = Field(default="", max_length=512)
 
 
 class RepoSystemPromptUpdate(BaseModel):
     """Custom LLM system prompt override for this repo's wiki generation. Empty = use default."""
+
     system_prompt: str = Field(default="", max_length=10_000)
 
 
 class RepoPromptOverridesUpdate(BaseModel):
     """JSON dict overriding specific prompt template keys (overview, architecture, module, setup).
     Pass null to clear all overrides and restore language defaults."""
+
     prompt_overrides: dict | None = None
 
 
 class RepoWikiLanguageUpdate(BaseModel):
     """ISO language code for this repo's wiki generation. Empty = use global WIKI_LANGUAGE setting."""
+
     wiki_language: str = Field(default="", max_length=8)
 
 
 class BranchListRequest(BaseModel):
     """Used by the connect form to fetch available branches before indexing."""
+
     gitlab_url: str = Field(..., min_length=1, max_length=512)
     project_path: str = Field(..., min_length=1, max_length=512)
     private_token: str = Field(..., min_length=1, max_length=512)
@@ -240,6 +264,7 @@ class PushToGitLabWikiResponse(BaseModel):
 
 
 # ---------- Group requests ----------
+
 
 class IndexGroupRequest(BaseModel):
     gitlab_url: str = Field(..., min_length=1, max_length=512, description="URL base de la instancia GitLab")
@@ -272,6 +297,7 @@ class CrossRepoSearchRequest(BaseModel):
 
 
 # ---------- Group responses ----------
+
 
 class GroupRepoStatusResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

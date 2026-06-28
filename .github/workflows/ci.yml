@@ -29,8 +29,20 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --dev
 
+      - name: Lint
+        run: uv run ruff check app tests
+
+      - name: Check formatting
+        run: uv run ruff format --check app tests
+
       - name: Run tests
         run: uv run pytest tests/ -x -q
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
 
   # ── Frontend ───────────────────────────────────────────────────────────────
   frontend:
@@ -45,7 +57,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.19.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

@@ -1,14 +1,14 @@
 """Tests for build_dependency_graph: JS relative imports, Python dotted-path imports."""
+
 import sys
+
 sys.path.insert(0, ".")
 
 from app.services.dependency_graph import build_dependency_graph
 
 _JS_FILES = {
     "src/index.js": (
-        "const usersRouter = require('./api/users');\n"
-        "const app = express();\n"
-        "app.use('/users', usersRouter);\n"
+        "const usersRouter = require('./api/users');\nconst app = express();\napp.use('/users', usersRouter);\n"
     ),
     "src/api/users.js": (
         "const { findUser, createUser } = require('../utils/userStore');\n"
@@ -40,14 +40,14 @@ def test_js_graph_nodes():
 
 def test_js_graph_no_self_edges():
     graph = build_dependency_graph(_JS_FILES, _JS_LANGUAGES)
-    assert not any(e.source == e.target for e in graph.edges), \
-        "no debe haber auto-referencias"
+    assert not any(e.source == e.target for e in graph.edges), "no debe haber auto-referencias"
 
 
 def test_js_graph_tests_depends_on_src():
     graph = build_dependency_graph(_JS_FILES, _JS_LANGUAGES)
-    assert any(e.source == "tests" and e.target == "src" for e in graph.edges), \
+    assert any(e.source == "tests" and e.target == "src" for e in graph.edges), (
         "tests debe depender de src (importa users.js)"
+    )
 
 
 def test_python_graph_two_level_grouping():
@@ -61,5 +61,6 @@ def test_python_graph_two_level_grouping():
 def test_python_graph_multiple_imports_per_file():
     graph = build_dependency_graph(_PY_FILES, _PY_LANGUAGES)
     assert any(e.source == "app/api" and e.target == "app/services" for e in graph.edges)
-    assert any(e.source == "app/api" and e.target == "app/models" for e in graph.edges), \
+    assert any(e.source == "app/api" and e.target == "app/models" for e in graph.edges), (
         "app/api debe depender de app/models (importa schemas.py)"
+    )

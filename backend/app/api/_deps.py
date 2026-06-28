@@ -1,4 +1,5 @@
 """Shared FastAPI dependency functions."""
+
 from __future__ import annotations
 
 from fastapi import Request

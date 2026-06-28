@@ -5,6 +5,7 @@ Usamos httpx directamente contra la API REST v4 en lugar de python-gitlab
 para tener control fino sobre paginación, timeouts y manejo de errores,
 y para que el resto del código no dependa de una librería externa pesada.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -79,18 +80,21 @@ class GitLabClient:
             resp = await self._http.get(url, params=params)
             if resp.status_code == 429:
                 if attempt < self._max_retries:
-                    wait = int(resp.headers.get("Retry-After", 2 ** attempt))
+                    wait = int(resp.headers.get("Retry-After", 2**attempt))
                     logger.warning(
                         "GitLab rate limit on %s; retrying in %ds (attempt %d/%d)",
-                        url, wait, attempt + 1, self._max_retries,
+                        url,
+                        wait,
+                        attempt + 1,
+                        self._max_retries,
                     )
                     await asyncio.sleep(wait)
                     continue
-                raise GitLabRateLimitError(
-                    f"GitLab rate limit exceeded after {self._max_retries} retries for {url}"
-                )
+                raise GitLabRateLimitError(f"GitLab rate limit exceeded after {self._max_retries} retries for {url}")
             if resp.status_code == 401:
-                raise GitLabAuthError("Token inválido, expirado o sin permisos suficientes (scope read_api/read_repository).")
+                raise GitLabAuthError(
+                    "Token inválido, expirado o sin permisos suficientes (scope read_api/read_repository)."
+                )
             if resp.status_code == 404:
                 raise GitLabNotFoundError(f"Recurso no encontrado en GitLab: {url}")
             resp.raise_for_status()
@@ -181,9 +185,7 @@ class GitLabClient:
 
     async def get_branch_commit_sha(self, project_id: str, branch: str) -> str:
         """Return the HEAD commit SHA for the exact branch being indexed."""
-        resp = await self._get(
-            f"{self.api_url}/projects/{project_id}/repository/branches/{quote(branch, safe='')}"
-        )
+        resp = await self._get(f"{self.api_url}/projects/{project_id}/repository/branches/{quote(branch, safe='')}")
         return resp.json().get("commit", {}).get("id", "")
 
     async def get_group(self, group_path: str) -> dict:
@@ -230,9 +232,7 @@ class GitLabClient:
                 break
         return projects
 
-    async def create_or_update_wiki_page(
-        self, project_id: str, slug: str, title: str, content: str
-    ) -> dict:
+    async def create_or_update_wiki_page(self, project_id: str, slug: str, title: str, content: str) -> dict:
         """Creates or updates a page in the project's native GitLab wiki.
 
         Tries PUT (update) first; falls back to POST (create) when the page does not exist.

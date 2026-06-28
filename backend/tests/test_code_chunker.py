@@ -1,13 +1,13 @@
 """Tests for code_chunker: long-file splitting, overlap, no lost lines, short-file passthrough."""
+
 import sys
+
 sys.path.insert(0, ".")
 
 from app.core.config import settings
 from app.services.code_chunker import chunk_file
 
-_LONG_CONTENT = "\n".join(
-    f"def function_{i}():  # línea numero {i} de relleno" for i in range(200)
-)
+_LONG_CONTENT = "\n".join(f"def function_{i}():  # línea numero {i} de relleno" for i in range(200))
 
 
 def test_long_file_produces_multiple_chunks():

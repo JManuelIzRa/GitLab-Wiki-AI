@@ -2,6 +2,7 @@
 Configuración central de la aplicación.
 Todos los valores se pueden sobreescribir con variables de entorno o un archivo .env
 """
+
 import re
 
 from pydantic import field_validator
@@ -33,8 +34,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./deepwiki.db"
 
     # --- Indexado ---
-    max_files_to_index: int = 400          # tope de archivos a leer por repo (evita timeouts)
-    max_file_size_bytes: int = 200_000      # no leer archivos gigantes (binarios, lockfiles enormes, etc.)
+    max_files_to_index: int = 400  # tope de archivos a leer por repo (evita timeouts)
+    max_file_size_bytes: int = 200_000  # no leer archivos gigantes (binarios, lockfiles enormes, etc.)
     # Presupuesto de contexto por llamada a IA. Recortado respecto a un modelo grande en la nube:
     # un modelo local 3B cuantizado degrada mucho con prompts largos, así que preferimos contextos
     # más pequeños y más enfocados (vía RAG) en vez de "meter todo" en el prompt.
@@ -42,17 +43,17 @@ class Settings(BaseSettings):
     max_chat_tokens: int = 2048
 
     # --- Chunking de código para RAG ---
-    rag_top_k: int = 6                # nº de chunks de código recuperados por pregunta
+    rag_top_k: int = 6  # nº de chunks de código recuperados por pregunta
     code_chunk_lines: int = 40
     code_chunk_lines_overlap: int = 15
     code_chunk_max_chars: int = 1500
 
     # --- Indexado / pipeline (sobreescribibles via .env) ---
-    max_module_pages: int = 6          # módulos principales que reciben página propia de IA
-    sample_files_per_module: int = 6   # archivos de muestra leídos por módulo para el prompt
-    embedding_batch_size: int = 32     # chunks por llamada al servicio de embeddings
-    max_files_to_embed: int = 300      # tope de archivos de código indexados en Qdrant
-    fetch_concurrency: int = 15        # peticiones HTTP paralelas al fetchar archivos del repo
+    max_module_pages: int = 6  # módulos principales que reciben página propia de IA
+    sample_files_per_module: int = 6  # archivos de muestra leídos por módulo para el prompt
+    embedding_batch_size: int = 32  # chunks por llamada al servicio de embeddings
+    max_files_to_embed: int = 300  # tope de archivos de código indexados en Qdrant
+    fetch_concurrency: int = 15  # peticiones HTTP paralelas al fetchar archivos del repo
     # Concurrent LLM calls during module page generation. Keep low (2-3) for local models
     # that don't pipeline well; raise to 6-10 when using a cloud API.
     max_concurrent_module_generations: int = 3
@@ -82,14 +83,14 @@ class Settings(BaseSettings):
     reindex_staleness_hours: int = 0
 
     # --- Rate limiting ---
-    rate_limit_index: str = "5/minute"   # máx. jobs de indexado nuevos por IP
-    rate_limit_chat: str = "30/minute"   # máx. preguntas de chat por IP
+    rate_limit_index: str = "5/minute"  # máx. jobs de indexado nuevos por IP
+    rate_limit_chat: str = "30/minute"  # máx. preguntas de chat por IP
 
     # --- Chat cache ---
-    chat_cache_max: int = 256            # max cached RAG answers stored per repo
+    chat_cache_max: int = 256  # max cached RAG answers stored per repo
 
     # --- Group indexing ---
-    group_concurrency: int = 3           # repos indexed in parallel per group job
+    group_concurrency: int = 3  # repos indexed in parallel per group job
 
     @field_validator("openai_url", "embedding_url")
     @classmethod

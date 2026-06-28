@@ -11,6 +11,7 @@ No depende de FastAPI ni de la sesión de DB directamente: recibe los objetos ya
 cargados, así es testeable de forma aislada y reutilizable si en el futuro se
 quiere exportar a otro formato (PDF, HTML) reusando el mismo orden de secciones.
 """
+
 from __future__ import annotations
 
 import html as _html
@@ -139,9 +140,7 @@ def export_wiki_to_html(repository, pages: list) -> str:
             current_section = page.parent_slug
             nav_lines.append(f'<div class="section-label">{_html.escape(current_section)}</div>')
         indent = "padding-left:22px;" if page.parent_slug else ""
-        nav_lines.append(
-            f'<a href="#{_html.escape(page.slug)}" style="{indent}">{_html.escape(page.title)}</a>'
-        )
+        nav_lines.append(f'<a href="#{_html.escape(page.slug)}" style="{indent}">{_html.escape(page.title)}</a>')
 
     # Build page sections (markdown rendered as escaped HTML + basic conversions)
     sections = []
@@ -183,7 +182,6 @@ def _markdown_to_html(md: str) -> str:
     for line in lines:
         if line.startswith("```"):
             if in_code:
-                lang = ""
                 out.append(f"<pre><code>{_html.escape(chr(10).join(code_buf))}</code></pre>")
                 code_buf = []
                 in_code = False

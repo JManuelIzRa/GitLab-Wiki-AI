@@ -9,11 +9,12 @@ The lock is held only for the job-creation window (a few database writes), not f
 the duration of indexing. Expired locks from crashed workers are cleaned up on the
 next acquisition attempt.
 """
+
 from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import delete

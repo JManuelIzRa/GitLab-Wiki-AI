@@ -1,4 +1,5 @@
 """Regenerate one existing wiki page from current GitLab source data."""
+
 from __future__ import annotations
 
 from app.core.config import settings
@@ -49,7 +50,8 @@ async def regenerate_page(repo: Repository, page: WikiPage, private_token: str) 
             if page.slug.startswith("module-"):
                 module = next(
                     (
-                        item for item in structure.modules
+                        item
+                        for item in structure.modules
                         if "module-" + item.path.replace("/", "-").lower() == page.slug
                     ),
                     None,
@@ -69,9 +71,7 @@ async def regenerate_page(repo: Repository, page: WikiPage, private_token: str) 
                         snippets.append(FileSnippet(path=path, content=content))
                 if not snippets:
                     raise ValueError("No readable source files remain for this module page")
-                return await generator.generate_module_page(
-                    project.name, module, snippets, system_prompt
-                )
+                return await generator.generate_module_page(project.name, module, snippets, system_prompt)
             raise ValueError(f"Page '{page.slug}' is not an AI-generated page")
         finally:
             await generator.close()

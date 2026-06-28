@@ -8,10 +8,11 @@ WikiPageRevision rastrea el historial de ediciones para permitir restaurar versi
 WikiCache persiste las respuestas de chat para sobrevivir reinicios del servidor.
 GitLabGroup / GroupIndexJob / GroupRepoStatus modelan el soporte de grupos GitLab.
 """
+
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import Boolean, Index, String, Text, DateTime, ForeignKey, Integer, JSON, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -40,6 +41,7 @@ class GroupIndexStatus(str, Enum):
 
 class GitLabGroup(Base):
     """A GitLab group (or subgroup) whose repositories have been collectively indexed."""
+
     __tablename__ = "gitlab_groups"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -57,13 +59,12 @@ class GitLabGroup(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    group_jobs: Mapped[list["GroupIndexJob"]] = relationship(
-        back_populates="group", cascade="all, delete-orphan"
-    )
+    group_jobs: Mapped[list["GroupIndexJob"]] = relationship(back_populates="group", cascade="all, delete-orphan")
 
 
 class GroupIndexJob(Base):
     """Tracks the progress of indexing all repositories in a GitLab group."""
+
     __tablename__ = "group_index_jobs"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -90,10 +91,9 @@ class GroupMembership(Base):
     under both group-a and group-b). This table replaces the single group_id FK
     on Repository for all cross-group queries.
     """
+
     __tablename__ = "group_memberships"
-    __table_args__ = (
-        UniqueConstraint("group_id", "repository_id", name="uq_group_membership"),
-    )
+    __table_args__ = (UniqueConstraint("group_id", "repository_id", name="uq_group_membership"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     group_id: Mapped[int] = mapped_column(ForeignKey("gitlab_groups.id", ondelete="CASCADE"), index=True)
@@ -102,14 +102,13 @@ class GroupMembership(Base):
 
 class GroupRepoStatus(Base):
     """Per-repo progress record within a single GroupIndexJob."""
+
     __tablename__ = "group_repo_statuses"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     group_job_id: Mapped[int] = mapped_column(ForeignKey("group_index_jobs.id"), index=True)
     project_path: Mapped[str] = mapped_column(String(512))
-    repository_id: Mapped[int | None] = mapped_column(
-        ForeignKey("repositories.id", ondelete="SET NULL"), nullable=True
-    )
+    repository_id: Mapped[int | None] = mapped_column(ForeignKey("repositories.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     error_message: Mapped[str] = mapped_column(Text, default="")
 
@@ -149,7 +148,9 @@ class Repository(Base):
         ForeignKey("gitlab_groups.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
 
     pages: Mapped[list["WikiPage"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
     jobs: Mapped[list["IndexJob"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
@@ -201,12 +202,11 @@ class WikiPageRevision(Base):
     A new revision is saved automatically whenever a page is edited via the PATCH endpoint,
     so users can roll back to any previous version (including the original AI-generated one).
     """
+
     __tablename__ = "wiki_page_revisions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    wiki_page_id: Mapped[int] = mapped_column(
-        ForeignKey("wiki_pages.id", ondelete="CASCADE"), index=True
-    )
+    wiki_page_id: Mapped[int] = mapped_column(ForeignKey("wiki_pages.id", ondelete="CASCADE"), index=True)
     content_markdown: Mapped[str] = mapped_column(Text)
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -221,6 +221,7 @@ class IndexLock(Base):
     an index job for the same repo_key. Expired locks (crashed workers) are cleaned
     up automatically on the next acquisition attempt.
     """
+
     __tablename__ = "index_locks"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -235,15 +236,12 @@ class WikiCache(Base):
     Replaces the previous in-memory OrderedDict so cached answers survive server restarts
     and cache invalidation on re-index is durable across processes.
     """
+
     __tablename__ = "wiki_cache"
-    __table_args__ = (
-        UniqueConstraint("repository_id", "question_hash", name="uq_wiki_cache_repo_question"),
-    )
+    __table_args__ = (UniqueConstraint("repository_id", "question_hash", name="uq_wiki_cache_repo_question"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    repository_id: Mapped[int] = mapped_column(
-        ForeignKey("repositories.id", ondelete="CASCADE"), index=True
-    )
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"), index=True)
     question_hash: Mapped[str] = mapped_column(String(32))
     answer: Mapped[str] = mapped_column(Text)
     sources_json: Mapped[str] = mapped_column(Text, default="[]")

@@ -1,4 +1,5 @@
 """Async client for an OpenAI-compatible HTTP embeddings endpoint."""
+
 from __future__ import annotations
 
 import httpx
@@ -53,7 +54,7 @@ class EmbeddingClient:
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        truncated = [text[:settings.embedding_max_input_chars] for text in texts]
+        truncated = [text[: settings.embedding_max_input_chars] for text in texts]
         try:
             response = await self._http.post(
                 self.url,
@@ -67,9 +68,7 @@ class EmbeddingClient:
                 raise ValueError(f"expected {len(texts)} embeddings, received {len(embeddings)}")
             if any(len(vector) != self.dimensions for vector in embeddings):
                 actual = len(embeddings[0]) if embeddings else 0
-                raise ValueError(
-                    f"embedding dimension mismatch: configured {self.dimensions}, received {actual}"
-                )
+                raise ValueError(f"embedding dimension mismatch: configured {self.dimensions}, received {actual}")
             return embeddings
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise EmbeddingError(f"Embedding service request failed: {exc}") from exc

@@ -3,10 +3,12 @@ Mock de la API de GitLab para pruebas locales sin acceso a red externa.
 Simula un proyecto pequeño con README, package.json y dos módulos (src/api, src/utils).
 Se levanta en el puerto 9000 y el test apunta el GitLabClient ahí.
 """
+
 import base64
+
+import uvicorn
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
-import uvicorn
 
 app = FastAPI()
 
@@ -39,6 +41,7 @@ def check_auth(token: str | None):
 # después. Por eso aquí declaramos primero las rutas concretas (branches, tree, files)
 # y al final la genérica de "obtener proyecto por path".
 
+
 @app.get("/api/v4/projects/{project_id}/repository/branches/{branch}")
 def get_branch(project_id: str, branch: str, private_token: str | None = Header(None, alias="PRIVATE-TOKEN")):
     check_auth(private_token)
@@ -53,10 +56,12 @@ def get_tree(project_id: str, private_token: str | None = Header(None, alias="PR
 
 
 @app.get("/api/v4/projects/{project_id}/repository/files/{file_path:path}")
-def get_file(project_id: str, file_path: str, ref: str = "main",
-             private_token: str | None = Header(None, alias="PRIVATE-TOKEN")):
+def get_file(
+    project_id: str, file_path: str, ref: str = "main", private_token: str | None = Header(None, alias="PRIVATE-TOKEN")
+):
     check_auth(private_token)
     from urllib.parse import unquote
+
     path = unquote(file_path)
     if path not in FILES:
         raise HTTPException(status_code=404, detail="404 File Not Found")

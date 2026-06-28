@@ -6,11 +6,12 @@ Sub-modules:
   _chat          — semantic code search, RAG chat (streaming + non-streaming)
   _groups        — group indexing, cross-repo search and chat
 """
+
 from fastapi import APIRouter
 
-from app.api._repositories import router as _repo_router
 from app.api._chat import router as _chat_router
 from app.api._groups import router as _group_router
+from app.api._repositories import router as _repo_router
 
 router = APIRouter(prefix="/api")
 router.include_router(_repo_router)

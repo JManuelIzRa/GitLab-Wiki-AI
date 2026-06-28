@@ -1,4 +1,5 @@
 """Repository, wiki, job, webhook, and utility endpoints."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,16 +18,32 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.db.session import AsyncSessionLocal, get_session
 from app.models.db_models import (
-    IndexJob, JobStatus, Repository, WikiPage, WikiPageRevision,
+    IndexJob,
+    JobStatus,
+    Repository,
+    WikiPage,
+    WikiPageRevision,
 )
 from app.models.schemas import (
-    BranchListRequest, DependencyGraphResponse, GitLabWebhookPayload,
-    IndexJobResponse, IndexRepositoryRequest, PushToGitLabWikiRequest,
+    BranchListRequest,
+    DependencyGraphResponse,
+    GitLabWebhookPayload,
+    IndexJobResponse,
+    IndexRepositoryRequest,
+    PushToGitLabWikiRequest,
+    PushToGitLabWikiResponse,
     RegenerateWikiPageRequest,
-    PushToGitLabWikiResponse, RepoGitLabTokenUpdate, RepoPromptOverridesUpdate,
-    RepoSystemPromptUpdate, RepoWebhookSecretUpdate, RepoWikiLanguageUpdate,
-    RepositorySummary, WikiPageDetail,
-    WikiPageUpdate, WikiRevisionResponse, WikiStructureResponse, WikiTextSearchResult,
+    RepoGitLabTokenUpdate,
+    RepoPromptOverridesUpdate,
+    RepositorySummary,
+    RepoSystemPromptUpdate,
+    RepoWebhookSecretUpdate,
+    RepoWikiLanguageUpdate,
+    WikiPageDetail,
+    WikiPageUpdate,
+    WikiRevisionResponse,
+    WikiStructureResponse,
+    WikiTextSearchResult,
 )
 from app.services.gitlab_client import GitLabAuthError, GitLabClient, GitLabNotFoundError
 from app.services.indexer import run_index_job
@@ -58,6 +75,7 @@ def _extract_excerpt(content: str, query: str, context: int = 120) -> str:
 # Indexing & jobs
 # ---------------------------------------------------------------------------
 
+
 @router.post("/repositories/index", response_model=IndexJobResponse)
 @limiter.limit(settings.rate_limit_index)
 async def index_repository(
@@ -70,13 +88,20 @@ async def index_repository(
     repo_key = f"{payload.gitlab_url.rstrip('/')}/{payload.project_path.strip('/')}"
     async with repo_index_lock(repo_key):
         existing = (
-            await session.execute(
-                select(Repository).where(
-                    Repository.gitlab_url == payload.gitlab_url,
-                    Repository.project_path == payload.project_path,
-                ).order_by(Repository.id.desc()).limit(1)
+            (
+                await session.execute(
+                    select(Repository)
+                    .where(
+                        Repository.gitlab_url == payload.gitlab_url,
+                        Repository.project_path == payload.project_path,
+                    )
+                    .order_by(Repository.id.desc())
+                    .limit(1)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
         if existing is None:
             repo = Repository(
@@ -91,15 +116,19 @@ async def index_repository(
         else:
             repo = existing
             active_job = (
-                await session.execute(
-                    select(IndexJob)
-                    .where(
-                        IndexJob.repository_id == repo.id,
-                        IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
+                (
+                    await session.execute(
+                        select(IndexJob)
+                        .where(
+                            IndexJob.repository_id == repo.id,
+                            IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
+                        )
+                        .limit(1)
                     )
-                    .limit(1)
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if active_job:
                 raise HTTPException(
                     status_code=409,
@@ -109,21 +138,31 @@ async def index_repository(
         await db_cache_invalidate(session, repo.id)
 
         job = IndexJob(
-            repository_id=repo.id, status=JobStatus.PENDING.value,
-            progress=0, current_step="En cola...",
+            repository_id=repo.id,
+            status=JobStatus.PENDING.value,
+            progress=0,
+            current_step="En cola...",
         )
         session.add(job)
         await session.commit()
         await session.refresh(job)
 
     background_tasks.add_task(
-        run_index_job, job.id, payload.gitlab_url, payload.project_path,
-        payload.private_token, payload.branch, payload.force_reindex,
+        run_index_job,
+        job.id,
+        payload.gitlab_url,
+        payload.project_path,
+        payload.private_token,
+        payload.branch,
+        payload.force_reindex,
     )
 
     return IndexJobResponse(
-        job_id=job.id, repository_id=repo.id, status=job.status,
-        progress=job.progress, current_step=job.current_step,
+        job_id=job.id,
+        repository_id=repo.id,
+        status=job.status,
+        progress=job.progress,
+        current_step=job.current_step,
     )
 
 
@@ -133,9 +172,14 @@ async def get_job_status(job_id: int, session: AsyncSession = Depends(get_sessio
     if job is None:
         raise HTTPException(status_code=404, detail="Job no encontrado")
     return IndexJobResponse(
-        job_id=job.id, repository_id=job.repository_id, status=job.status,
-        progress=job.progress, current_step=job.current_step, error_message=job.error_message,
-        created_at=job.created_at, finished_at=job.finished_at,
+        job_id=job.id,
+        repository_id=job.repository_id,
+        status=job.status,
+        progress=job.progress,
+        current_step=job.current_step,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        finished_at=job.finished_at,
     )
 
 
@@ -148,13 +192,17 @@ async def list_repository_jobs(
     if await session.get(Repository, repo_id) is None:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
     jobs = (
-        await session.execute(
-            select(IndexJob)
-            .where(IndexJob.repository_id == repo_id)
-            .order_by(IndexJob.created_at.desc())
-            .limit(limit)
+        (
+            await session.execute(
+                select(IndexJob)
+                .where(IndexJob.repository_id == repo_id)
+                .order_by(IndexJob.created_at.desc())
+                .limit(limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         IndexJobResponse(
             job_id=job.id,
@@ -173,6 +221,7 @@ async def list_repository_jobs(
 @router.get("/jobs/{job_id}/stream")
 async def stream_job_status(job_id: int):
     """SSE stream of job progress until it reaches a terminal state."""
+
     async def event_generator():
         last_key: tuple | None = None
         while True:
@@ -186,8 +235,11 @@ async def stream_job_status(job_id: int):
                 if current_key != last_key:
                     last_key = current_key
                     payload = IndexJobResponse(
-                        job_id=job.id, repository_id=job.repository_id, status=job.status,
-                        progress=job.progress, current_step=job.current_step,
+                        job_id=job.id,
+                        repository_id=job.repository_id,
+                        status=job.status,
+                        progress=job.progress,
+                        current_step=job.current_step,
                         error_message=job.error_message,
                     )
                     yield f"data: {payload.model_dump_json()}\n\n"
@@ -209,6 +261,7 @@ async def stream_job_status(job_id: int):
 # Repository listing and wiki structure
 # ---------------------------------------------------------------------------
 
+
 @router.get("/repositories", response_model=list[RepositorySummary])
 async def list_repositories(
     session: AsyncSession = Depends(get_session),
@@ -216,10 +269,10 @@ async def list_repositories(
     limit: int = Query(100, ge=1, le=500),
 ):
     repos = (
-        await session.execute(
-            select(Repository).order_by(Repository.updated_at.desc()).offset(offset).limit(limit)
-        )
-    ).scalars().all()
+        (await session.execute(select(Repository).order_by(Repository.updated_at.desc()).offset(offset).limit(limit)))
+        .scalars()
+        .all()
+    )
     return [RepositorySummary.from_orm_with_extras(r) for r in repos]
 
 
@@ -229,19 +282,17 @@ async def get_wiki_structure(repo_id: int, session: AsyncSession = Depends(get_s
     if repo is None:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
     pages = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)
-        )
-    ).scalars().all()
+        (await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)))
+        .scalars()
+        .all()
+    )
     return WikiStructureResponse(repository=RepositorySummary.from_orm_with_extras(repo), pages=pages)
 
 
 @router.get("/repositories/{repo_id}/wiki/{slug}", response_model=WikiPageDetail)
 async def get_wiki_page(repo_id: int, slug: str, session: AsyncSession = Depends(get_session)):
     page = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug)
-        )
+        await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug))
     ).scalar_one_or_none()
     if page is None:
         raise HTTPException(status_code=404, detail="Página no encontrada")
@@ -264,9 +315,7 @@ async def regenerate_wiki_page(
     if repo is None:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
     page = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug)
-        )
+        await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug))
     ).scalar_one_or_none()
     if page is None:
         raise HTTPException(status_code=404, detail="Página no encontrada")
@@ -338,9 +387,7 @@ async def update_wiki_page(
 ):
     """Saves a manual edit and snapshots the previous content as a revision."""
     page = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug)
-        )
+        await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug))
     ).scalar_one_or_none()
     if page is None:
         raise HTTPException(status_code=404, detail="Página no encontrada")
@@ -365,6 +412,7 @@ async def update_wiki_page(
 # Wiki revisions
 # ---------------------------------------------------------------------------
 
+
 @router.get("/repositories/{repo_id}/wiki/{slug}/revisions", response_model=list[WikiRevisionResponse])
 async def get_wiki_revisions(
     repo_id: int,
@@ -372,21 +420,23 @@ async def get_wiki_revisions(
     session: AsyncSession = Depends(get_session),
 ):
     page = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug)
-        )
+        await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug))
     ).scalar_one_or_none()
     if page is None:
         raise HTTPException(status_code=404, detail="Página no encontrada")
 
     revisions = (
-        await session.execute(
-            select(WikiPageRevision)
-            .where(WikiPageRevision.wiki_page_id == page.id)
-            .order_by(WikiPageRevision.created_at.desc())
-            .limit(50)
+        (
+            await session.execute(
+                select(WikiPageRevision)
+                .where(WikiPageRevision.wiki_page_id == page.id)
+                .order_by(WikiPageRevision.created_at.desc())
+                .limit(50)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return [
         WikiRevisionResponse(
@@ -411,9 +461,7 @@ async def restore_wiki_revision(
     session: AsyncSession = Depends(get_session),
 ):
     page = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug)
-        )
+        await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id, WikiPage.slug == slug))
     ).scalar_one_or_none()
     if page is None:
         raise HTTPException(status_code=404, detail="Página no encontrada")
@@ -442,6 +490,7 @@ async def restore_wiki_revision(
 # Export and dependency graph
 # ---------------------------------------------------------------------------
 
+
 @router.get("/repositories/{repo_id}/dependency-graph", response_model=DependencyGraphResponse)
 async def get_dependency_graph(repo_id: int, session: AsyncSession = Depends(get_session)):
     repo = await session.get(Repository, repo_id)
@@ -457,10 +506,10 @@ async def export_wiki(repo_id: int, session: AsyncSession = Depends(get_session)
     if repo is None:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
     pages = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)
-        )
-    ).scalars().all()
+        (await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)))
+        .scalars()
+        .all()
+    )
     if not pages:
         raise HTTPException(status_code=400, detail="Este repositorio aún no tiene wiki generado")
 
@@ -481,10 +530,10 @@ async def export_wiki_html(repo_id: int, session: AsyncSession = Depends(get_ses
     if repo is None:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
     pages = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)
-        )
-    ).scalars().all()
+        (await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)))
+        .scalars()
+        .all()
+    )
     if not pages:
         raise HTTPException(status_code=400, detail="Este repositorio aún no tiene wiki generado")
 
@@ -510,27 +559,31 @@ async def search_wiki_text(
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
 
     try:
-        rows = (await session.execute(
-            text(
-                "SELECT p.slug, p.title, p.content_markdown "
-                "FROM wiki_pages_fts fts "
-                "JOIN wiki_pages p ON p.id = fts.rowid "
-                "WHERE p.repository_id = :repo_id AND wiki_pages_fts MATCH :q "
-                "ORDER BY rank LIMIT 20"
-            ),
-            {"repo_id": repo_id, "q": q},
-        )).all()
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT p.slug, p.title, p.content_markdown "
+                    "FROM wiki_pages_fts fts "
+                    "JOIN wiki_pages p ON p.id = fts.rowid "
+                    "WHERE p.repository_id = :repo_id AND wiki_pages_fts MATCH :q "
+                    "ORDER BY rank LIMIT 20"
+                ),
+                {"repo_id": repo_id, "q": q},
+            )
+        ).all()
     except Exception:
         like_term = f"%{q}%"
-        rows = (await session.execute(
-            select(WikiPage.slug, WikiPage.title, WikiPage.content_markdown)
-            .where(
-                WikiPage.repository_id == repo_id,
-                or_(WikiPage.title.ilike(like_term), WikiPage.content_markdown.ilike(like_term)),
+        rows = (
+            await session.execute(
+                select(WikiPage.slug, WikiPage.title, WikiPage.content_markdown)
+                .where(
+                    WikiPage.repository_id == repo_id,
+                    or_(WikiPage.title.ilike(like_term), WikiPage.content_markdown.ilike(like_term)),
+                )
+                .order_by(WikiPage.order)
+                .limit(20)
             )
-            .order_by(WikiPage.order)
-            .limit(20)
-        )).all()
+        ).all()
 
     return [
         WikiTextSearchResult(slug=row.slug, title=row.title, excerpt=_extract_excerpt(row.content_markdown, q))
@@ -541,6 +594,7 @@ async def search_wiki_text(
 # ---------------------------------------------------------------------------
 # Per-repo settings
 # ---------------------------------------------------------------------------
+
 
 @router.patch("/repositories/{repo_id}/webhook-secret")
 async def set_repo_webhook_secret(
@@ -618,12 +672,14 @@ async def set_repo_wiki_language(
 # GitLab utility proxy
 # ---------------------------------------------------------------------------
 
+
 @router.post("/gitlab/branches")
 async def list_gitlab_branches(payload: BranchListRequest):
     """Proxy: list branches for a GitLab project."""
     try:
         async with GitLabClient(base_url=payload.gitlab_url, private_token=payload.private_token) as client:
             from urllib.parse import quote
+
             encoded = quote(payload.project_path, safe="")
             resp = await client._get(f"{client.api_url}/projects/{encoded}")
             project_id = str(resp.json()["id"])
@@ -641,6 +697,7 @@ async def list_gitlab_branches(payload: BranchListRequest):
 # Push to GitLab native wiki
 # ---------------------------------------------------------------------------
 
+
 @router.post("/repositories/{repo_id}/push-to-gitlab-wiki", response_model=PushToGitLabWikiResponse)
 async def push_to_gitlab_wiki(
     repo_id: int,
@@ -651,10 +708,10 @@ async def push_to_gitlab_wiki(
     if repo is None:
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
     pages = (
-        await session.execute(
-            select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)
-        )
-    ).scalars().all()
+        (await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)))
+        .scalars()
+        .all()
+    )
     if not pages:
         raise HTTPException(status_code=400, detail="Este repositorio aún no tiene wiki generado")
     if not repo.project_id:
@@ -685,6 +742,7 @@ async def push_to_gitlab_wiki(
 # GitLab webhooks
 # ---------------------------------------------------------------------------
 
+
 @router.post("/webhooks/gitlab", status_code=202)
 async def gitlab_webhook(
     request: Request,
@@ -697,15 +755,13 @@ async def gitlab_webhook(
     repo_early = None
     if project_path_early:
         repo_early = (
-            await session.execute(
-                select(Repository).where(Repository.project_path == project_path_early).limit(1)
-            )
-        ).scalars().first()
+            (await session.execute(select(Repository).where(Repository.project_path == project_path_early).limit(1)))
+            .scalars()
+            .first()
+        )
 
     effective_secret = (
-        repo_early.webhook_secret
-        if repo_early and repo_early.webhook_secret
-        else settings.gitlab_webhook_secret
+        repo_early.webhook_secret if repo_early and repo_early.webhook_secret else settings.gitlab_webhook_secret
     )
     if effective_secret:
         token = request.headers.get("x-gitlab-token", "")
@@ -719,11 +775,12 @@ async def gitlab_webhook(
     if not project_path:
         raise HTTPException(status_code=422, detail="Missing project.path_with_namespace in payload")
 
-    repo = repo_early or (
-        await session.execute(
-            select(Repository).where(Repository.project_path == project_path).limit(1)
-        )
-    ).scalars().first()
+    repo = (
+        repo_early
+        or (await session.execute(select(Repository).where(Repository.project_path == project_path).limit(1)))
+        .scalars()
+        .first()
+    )
 
     if repo is None:
         return {"ok": True, "skipped": True, "reason": "repo not indexed"}
@@ -731,26 +788,33 @@ async def gitlab_webhook(
     reindex_token = repo.gitlab_token or settings.gitlab_default_token
     if not reindex_token:
         logger.warning(
-            "Webhook for '%s' received but no token available for re-indexing.", project_path,
+            "Webhook for '%s' received but no token available for re-indexing.",
+            project_path,
         )
         return {"ok": True, "skipped": True, "reason": "no token configured for re-indexing"}
 
     active_job = (
-        await session.execute(
-            select(IndexJob)
-            .where(
-                IndexJob.repository_id == repo.id,
-                IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
+        (
+            await session.execute(
+                select(IndexJob)
+                .where(
+                    IndexJob.repository_id == repo.id,
+                    IndexJob.status.notin_([JobStatus.DONE.value, JobStatus.FAILED.value]),
+                )
+                .limit(1)
             )
-            .limit(1)
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if active_job:
         return {"ok": True, "skipped": True, "reason": "indexing already in progress", "job_id": active_job.id}
 
     await db_cache_invalidate(session, repo.id)
     job = IndexJob(
-        repository_id=repo.id, status=JobStatus.PENDING.value, progress=0,
+        repository_id=repo.id,
+        status=JobStatus.PENDING.value,
+        progress=0,
         current_step="En cola (disparado por webhook de GitLab)...",
     )
     session.add(job)
@@ -758,7 +822,13 @@ async def gitlab_webhook(
     await session.refresh(job)
 
     background_tasks.add_task(
-        run_index_job, job.id, repo.gitlab_url, repo.project_path, reindex_token, None, False,
+        run_index_job,
+        job.id,
+        repo.gitlab_url,
+        repo.project_path,
+        reindex_token,
+        None,
+        False,
     )
     return {"ok": True, "job_id": job.id}
 
@@ -766,6 +836,7 @@ async def gitlab_webhook(
 # ---------------------------------------------------------------------------
 # Delete repository
 # ---------------------------------------------------------------------------
+
 
 @router.delete("/repositories/{repo_id}")
 async def delete_repository(repo_id: int, session: AsyncSession = Depends(get_session)):
@@ -786,6 +857,7 @@ async def delete_repository(repo_id: int, session: AsyncSession = Depends(get_se
 # ---------------------------------------------------------------------------
 # Server configuration (read-only)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/config")
 async def get_server_config():

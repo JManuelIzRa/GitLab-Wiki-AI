@@ -10,6 +10,7 @@ Los IDs de punto se derivan determinísticamente del path+chunk_index del códig
 (vía UUID5), así que reindexar el mismo archivo sobreescribe el punto en vez de
 duplicarlo.
 """
+
 from __future__ import annotations
 
 import logging
@@ -106,8 +107,11 @@ class VectorStore:
                 limit=top_k,
             )
         except Exception:
-            logger.warning("Búsqueda en Qdrant fallida para colección '%s'; degradando a contexto sin código.",
-                           self.collection_name, exc_info=True)
+            logger.warning(
+                "Búsqueda en Qdrant fallida para colección '%s'; degradando a contexto sin código.",
+                self.collection_name,
+                exc_info=True,
+            )
             return []
 
         return [
@@ -132,9 +136,7 @@ class VectorStore:
         try:
             await self._client.delete(
                 collection_name=self.collection_name,
-                points_selector=Filter(
-                    must=[FieldCondition(key="file_path", match=MatchAny(any=list(file_paths)))]
-                ),
+                points_selector=Filter(must=[FieldCondition(key="file_path", match=MatchAny(any=list(file_paths)))]),
             )
             logger.info("Deleted Qdrant points for %d paths in '%s'", len(file_paths), self.collection_name)
         except Exception:
@@ -154,7 +156,7 @@ class VectorStore:
                 name = col.name
                 if not name.startswith(prefix):
                     continue
-                suffix = name[len(prefix):]
+                suffix = name[len(prefix) :]
                 try:
                     repo_id = int(suffix)
                 except ValueError:

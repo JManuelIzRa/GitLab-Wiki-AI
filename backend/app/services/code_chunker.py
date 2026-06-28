@@ -17,6 +17,7 @@ fallan al parsear (sintaxis inválida, archivo no es realmente código) se degra
 chunk único con todo el contenido, en vez de perderse silenciosamente — más texto del
 necesario en el peor caso es preferible a no indexar nada de ese archivo.
 """
+
 from __future__ import annotations
 
 import logging
@@ -31,27 +32,37 @@ logger = logging.getLogger(__name__)
 # (ver https://github.com/Goldziher/tree-sitter-language-pack para la lista completa).
 EXTENSION_TO_TREE_SITTER_LANGUAGE: dict[str, str] = {
     ".py": "python",
-    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
-    ".ts": "typescript", ".tsx": "tsx",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
     ".java": "java",
-    ".kt": "kotlin", ".kts": "kotlin",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
     ".go": "go",
     ".rs": "rust",
     ".rb": "ruby",
     ".php": "php",
     ".cs": "c_sharp",
-    ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp",
-    ".c": "c", ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".c": "c",
+    ".h": "c",
     ".swift": "swift",
     ".scala": "scala",
-    ".sh": "bash", ".bash": "bash",
+    ".sh": "bash",
+    ".bash": "bash",
 }
 
 
 @dataclass
 class CodeChunk:
     file_path: str
-    chunk_index: int          # posición del chunk dentro del archivo (0, 1, 2...)
+    chunk_index: int  # posición del chunk dentro del archivo (0, 1, 2...)
     start_line: int
     end_line: int
     content: str
@@ -132,13 +143,15 @@ def _fallback_line_chunks(file_path: str, content: str) -> list[CodeChunk]:
             chunk_lines = [lines[i][:max_chars]]
             j = i + 1
 
-        chunks.append(CodeChunk(
-            file_path=file_path,
-            chunk_index=len(chunks),
-            start_line=i + 1,
-            end_line=j,
-            content="\n".join(chunk_lines),
-        ))
+        chunks.append(
+            CodeChunk(
+                file_path=file_path,
+                chunk_index=len(chunks),
+                start_line=i + 1,
+                end_line=j,
+                content="\n".join(chunk_lines),
+            )
+        )
 
         if j >= len(lines):
             break
@@ -178,8 +191,7 @@ def chunk_file(file_path: str, content: str, language: str | None = None, parser
         doc = Document(text=content)
         nodes = splitter.get_nodes_from_documents([doc])
     except Exception as e:  # noqa: BLE001 - parser inexistente, código con sintaxis inválida, etc.
-        logger.warning("CodeSplitter falló para '%s' (lenguaje=%s): %s; usando chunk único.",
-                        file_path, language, e)
+        logger.warning("CodeSplitter falló para '%s' (lenguaje=%s): %s; usando chunk único.", file_path, language, e)
         return _fallback_line_chunks(file_path, content)
 
     if not nodes:
@@ -199,9 +211,15 @@ def chunk_file(file_path: str, content: str, language: str | None = None, parser
             start_line = 1
             end_line = node_text.count("\n") + 1
 
-        chunks.append(CodeChunk(
-            file_path=file_path, chunk_index=i, start_line=start_line, end_line=end_line, content=node_text,
-        ))
+        chunks.append(
+            CodeChunk(
+                file_path=file_path,
+                chunk_index=i,
+                start_line=start_line,
+                end_line=end_line,
+                content=node_text,
+            )
+        )
 
     return chunks
 

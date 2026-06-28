@@ -4,12 +4,13 @@ Cross-repository semantic search.
 Fan-out: embeds the query once, then searches each repo's Qdrant collection in
 parallel and merges results ranked by score.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 
-from app.services.embedding_client import EmbeddingError, get_embedding_client
+from app.services.embedding_client import get_embedding_client
 from app.services.vector_store import RetrievedChunk, VectorStore
 
 logger = logging.getLogger(__name__)

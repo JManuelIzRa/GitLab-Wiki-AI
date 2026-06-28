@@ -1,4 +1,5 @@
 """Group indexing and cross-repository chat/search endpoints."""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,13 +17,27 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.db.session import AsyncSessionLocal, get_session
 from app.models.db_models import (
-    GitLabGroup, GroupIndexJob, GroupIndexStatus, GroupMembership, GroupRepoStatus,
+    GitLabGroup,
+    GroupIndexJob,
+    GroupIndexStatus,
+    GroupMembership,
+    GroupRepoStatus,
     Repository,
 )
 from app.models.schemas import (
-    ChatRequest, ChatResponse, CodeSource, CrossRepoSearchRequest, CrossRepoSearchResponse,
-    CrossRepoSearchResult, DependencyGraphResponse, GroupDetail, GroupJobResponse,
-    GroupRepoStatusResponse, GroupSummary, IndexGroupRequest, RepositorySummary,
+    ChatRequest,
+    ChatResponse,
+    CodeSource,
+    CrossRepoSearchRequest,
+    CrossRepoSearchResponse,
+    CrossRepoSearchResult,
+    DependencyGraphResponse,
+    GroupDetail,
+    GroupJobResponse,
+    GroupRepoStatusResponse,
+    GroupSummary,
+    IndexGroupRequest,
+    RepositorySummary,
 )
 from app.services.cross_repo_search import search_across_repos
 from app.services.group_indexer import run_group_index_job
@@ -40,11 +55,7 @@ async def _expand_with_external_deps(
 ) -> list[int]:
     """Return member_ids expanded with externally-referenced repos from the cross-repo graph."""
     graph = group.cross_repo_graph or {}
-    external_names = {
-        e["target"]
-        for e in graph.get("edges", [])
-        if e.get("external") and e.get("target")
-    }
+    external_names = {e["target"] for e in graph.get("edges", []) if e.get("external") and e.get("target")}
     if not external_names:
         return member_ids
 
@@ -56,7 +67,9 @@ async def _expand_with_external_deps(
                     Repository.indexed_in_qdrant.is_(True),
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     return list(set(member_ids) | set(external_ids))
 
@@ -64,6 +77,7 @@ async def _expand_with_external_deps(
 # ---------------------------------------------------------------------------
 # Group indexing
 # ---------------------------------------------------------------------------
+
 
 @router.post("/groups/index", response_model=GroupJobResponse)
 @limiter.limit(settings.rate_limit_index)
@@ -75,13 +89,17 @@ async def index_group(
 ):
     """Discovers and indexes all repositories in a GitLab group."""
     existing_group = (
-        await session.execute(
-            select(GitLabGroup).where(
-                GitLabGroup.gitlab_url == payload.gitlab_url,
-                GitLabGroup.group_path == payload.group_path,
+        (
+            await session.execute(
+                select(GitLabGroup).where(
+                    GitLabGroup.gitlab_url == payload.gitlab_url,
+                    GitLabGroup.group_path == payload.group_path,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if existing_group is None:
         group = GitLabGroup(
@@ -95,15 +113,19 @@ async def index_group(
     else:
         group = existing_group
         active_job = (
-            await session.execute(
-                select(GroupIndexJob).where(
-                    GroupIndexJob.group_id == group.id,
-                    GroupIndexJob.status.notin_([
-                        GroupIndexStatus.DONE.value, GroupIndexStatus.FAILED.value
-                    ]),
-                ).limit(1)
+            (
+                await session.execute(
+                    select(GroupIndexJob)
+                    .where(
+                        GroupIndexJob.group_id == group.id,
+                        GroupIndexJob.status.notin_([GroupIndexStatus.DONE.value, GroupIndexStatus.FAILED.value]),
+                    )
+                    .limit(1)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if active_job:
             raise HTTPException(
                 status_code=409,
@@ -147,10 +169,10 @@ async def list_groups(
     limit: int = Query(100, ge=1, le=500),
 ):
     groups = (
-        await session.execute(
-            select(GitLabGroup).order_by(GitLabGroup.updated_at.desc()).offset(offset).limit(limit)
-        )
-    ).scalars().all()
+        (await session.execute(select(GitLabGroup).order_by(GitLabGroup.updated_at.desc()).offset(offset).limit(limit)))
+        .scalars()
+        .all()
+    )
     return groups
 
 
@@ -160,13 +182,17 @@ async def get_group(group_id: int, session: AsyncSession = Depends(get_session))
     if group is None:
         raise HTTPException(status_code=404, detail="Grupo no encontrado")
     repos = (
-        await session.execute(
-            select(Repository)
-            .join(GroupMembership, GroupMembership.repository_id == Repository.id)
-            .where(GroupMembership.group_id == group_id)
-            .order_by(Repository.name)
+        (
+            await session.execute(
+                select(Repository)
+                .join(GroupMembership, GroupMembership.repository_id == Repository.id)
+                .where(GroupMembership.group_id == group_id)
+                .order_by(Repository.name)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return GroupDetail(
         id=group.id,
         gitlab_url=group.gitlab_url,
@@ -187,10 +213,8 @@ async def get_group_job(group_id: int, job_id: int, session: AsyncSession = Depe
     if job is None or job.group_id != group_id:
         raise HTTPException(status_code=404, detail="Job no encontrado")
     rs_rows = (
-        await session.execute(
-            select(GroupRepoStatus).where(GroupRepoStatus.group_job_id == job_id)
-        )
-    ).scalars().all()
+        (await session.execute(select(GroupRepoStatus).where(GroupRepoStatus.group_job_id == job_id))).scalars().all()
+    )
     return GroupJobResponse(
         job_id=job.id,
         group_id=job.group_id,
@@ -216,6 +240,7 @@ async def get_group_job(group_id: int, job_id: int, session: AsyncSession = Depe
 @router.get("/groups/{group_id}/jobs/{job_id}/stream")
 async def stream_group_job(group_id: int, job_id: int):
     """SSE stream of GroupIndexJob progress until terminal state."""
+
     async def event_generator():
         last_key: tuple | None = None
         while True:
@@ -226,10 +251,10 @@ async def stream_group_job(group_id: int, job_id: int):
                     return
 
                 rs_rows = (
-                    await session.execute(
-                        select(GroupRepoStatus).where(GroupRepoStatus.group_job_id == job_id)
-                    )
-                ).scalars().all()
+                    (await session.execute(select(GroupRepoStatus).where(GroupRepoStatus.group_job_id == job_id)))
+                    .scalars()
+                    .all()
+                )
 
                 current_key = (job.status, job.completed_repos, job.failed_repos, job.current_step)
                 if current_key != last_key:
@@ -300,7 +325,9 @@ async def cross_repo_search(
                     .join(GroupMembership, GroupMembership.repository_id == Repository.id)
                     .where(GroupMembership.group_id == group_id)
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         expanded_ids = await _expand_with_external_deps(session, group, member_ids)
         repo_ids = list(
@@ -311,21 +338,21 @@ async def cross_repo_search(
                         Repository.indexed_in_qdrant.is_(True),
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     if not repo_ids:
         raise HTTPException(status_code=400, detail="No hay repositorios con RAG activo en este grupo")
 
     repos_meta = {
-        r.id: r
-        for r in (
-            await session.execute(select(Repository).where(Repository.id.in_(repo_ids)))
-        ).scalars().all()
+        r.id: r for r in (await session.execute(select(Repository).where(Repository.id.in_(repo_ids)))).scalars().all()
     }
 
     try:
         from app.services.embedding_client import EmbeddingError
+
         hits = await search_across_repos(
             query=payload.query,
             repo_ids=repo_ids,
@@ -335,19 +362,21 @@ async def cross_repo_search(
     except EmbeddingError as exc:
         raise HTTPException(status_code=502, detail=f"No se pudo generar el embedding: {exc}")
 
-    return CrossRepoSearchResponse(results=[
-        CrossRepoSearchResult(
-            repository_id=rid,
-            repository_name=repos_meta[rid].name if rid in repos_meta else str(rid),
-            repository_path=repos_meta[rid].project_path if rid in repos_meta else "",
-            file_path=chunk.file_path,
-            start_line=chunk.start_line,
-            end_line=chunk.end_line,
-            content=chunk.content,
-            score=chunk.score,
-        )
-        for rid, chunk in hits
-    ])
+    return CrossRepoSearchResponse(
+        results=[
+            CrossRepoSearchResult(
+                repository_id=rid,
+                repository_name=repos_meta[rid].name if rid in repos_meta else str(rid),
+                repository_path=repos_meta[rid].project_path if rid in repos_meta else "",
+                file_path=chunk.file_path,
+                start_line=chunk.start_line,
+                end_line=chunk.end_line,
+                content=chunk.content,
+                score=chunk.score,
+            )
+            for rid, chunk in hits
+        ]
+    )
 
 
 @router.post("/groups/{group_id}/chat", response_model=ChatResponse)
@@ -371,7 +400,9 @@ async def group_chat(
                 .join(GroupMembership, GroupMembership.repository_id == Repository.id)
                 .where(GroupMembership.group_id == group_id)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     all_repo_ids = await _expand_with_external_deps(session, group, member_ids)
     qdrant_repo_ids = list(
@@ -382,12 +413,12 @@ async def group_chat(
                     Repository.indexed_in_qdrant.is_(True),
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     repo_names = list(
-        (
-            await session.execute(select(Repository.name).where(Repository.id.in_(all_repo_ids)))
-        ).scalars().all()
+        (await session.execute(select(Repository.name).where(Repository.id.in_(all_repo_ids)))).scalars().all()
     )
 
     retrieved_chunks = []
@@ -420,8 +451,11 @@ async def group_chat(
 
     sources = [
         CodeSource(
-            file_path=c.file_path, start_line=c.start_line, end_line=c.end_line,
-            content=c.content, score=c.score,
+            file_path=c.file_path,
+            start_line=c.start_line,
+            end_line=c.end_line,
+            content=c.content,
+            score=c.score,
         )
         for c in retrieved_chunks
     ]
@@ -449,7 +483,9 @@ async def stream_group_chat(
                 .join(GroupMembership, GroupMembership.repository_id == Repository.id)
                 .where(GroupMembership.group_id == group_id)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     all_ids = await _expand_with_external_deps(session, group, member_ids)
     qdrant_repo_ids = list(
@@ -460,12 +496,12 @@ async def stream_group_chat(
                     Repository.indexed_in_qdrant.is_(True),
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     repo_names = list(
-        (
-            await session.execute(select(Repository.name).where(Repository.id.in_(all_ids)))
-        ).scalars().all()
+        (await session.execute(select(Repository.name).where(Repository.id.in_(all_ids)))).scalars().all()
     )
 
     retrieved_chunks = []
@@ -483,8 +519,11 @@ async def stream_group_chat(
 
     sources = [
         CodeSource(
-            file_path=c.file_path, start_line=c.start_line, end_line=c.end_line,
-            content=c.content, score=c.score,
+            file_path=c.file_path,
+            start_line=c.start_line,
+            end_line=c.end_line,
+            content=c.content,
+            score=c.score,
         )
         for c in retrieved_chunks
     ]

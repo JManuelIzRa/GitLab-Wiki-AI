@@ -8,6 +8,7 @@ Flujo:
 4. Una vez completados todos, generar el overview del grupo y el grafo cross-repo.
 5. Actualizar el GroupIndexJob a DONE.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -15,9 +16,8 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
@@ -81,13 +81,17 @@ async def _index_single_repo(
             # Create or reuse the Repository record and its IndexJob in a fresh session.
             async with AsyncSessionLocal() as session:
                 existing = (
-                    await session.execute(
-                        select(Repository).where(
-                            Repository.gitlab_url == gitlab_url,
-                            Repository.project_path == project_path,
+                    (
+                        await session.execute(
+                            select(Repository).where(
+                                Repository.gitlab_url == gitlab_url,
+                                Repository.project_path == project_path,
+                            )
                         )
                     )
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
 
                 if existing is None:
                     repo = Repository(
@@ -134,9 +138,7 @@ async def _index_single_repo(
                     await session.commit()
 
             # Run the per-repo indexing pipeline (creates its own sessions internally).
-            await run_index_job(
-                index_job_id, gitlab_url, project_path, private_token, None, force_reindex
-            )
+            await run_index_job(index_job_id, gitlab_url, project_path, private_token, None, force_reindex)
 
             # Check final status of the IndexJob.
             async with AsyncSessionLocal() as session:
@@ -157,9 +159,7 @@ async def _index_single_repo(
                     else:
                         group_job.failed_repos += 1
                     done = group_job.completed_repos + group_job.failed_repos
-                    group_job.current_step = (
-                        f"Completados {done}/{group_job.total_repos}..."
-                    )
+                    group_job.current_step = f"Completados {done}/{group_job.total_repos}..."
                 await session.commit()
 
         except Exception as exc:
@@ -200,16 +200,15 @@ async def run_group_index_job(
         try:
             # --- 1. Discover projects in the group ---
             await _update_group_job(
-                session, job,
+                session,
+                job,
                 status=GroupIndexStatus.DISCOVERING.value,
                 step="Descubriendo proyectos del grupo...",
             )
 
             async with GitLabClient(base_url=gitlab_url, private_token=private_token) as client:
                 gl_group = await client.get_group(group_path)
-                projects = await client.list_group_projects(
-                    group_path, include_subgroups=include_subgroups
-                )
+                projects = await client.list_group_projects(group_path, include_subgroups=include_subgroups)
 
             # Update group metadata from GitLab response.
             group.gitlab_group_id = str(gl_group.get("id", ""))
@@ -220,14 +219,14 @@ async def run_group_index_job(
 
             if not projects:
                 await _update_group_job(
-                    session, job,
+                    session,
+                    job,
                     status=GroupIndexStatus.DONE.value,
                     step="Sin proyectos en el grupo.",
                 )
                 return
 
             # --- 2. Create per-repo status rows ---
-            repo_status_ids: list[tuple[dict, int]] = []
             for proj in projects:
                 rs = GroupRepoStatus(
                     group_job_id=job.id,
@@ -239,10 +238,10 @@ async def run_group_index_job(
 
             # Fetch the created rows back for their IDs.
             rs_rows = (
-                await session.execute(
-                    select(GroupRepoStatus).where(GroupRepoStatus.group_job_id == job.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(GroupRepoStatus).where(GroupRepoStatus.group_job_id == job.id)))
+                .scalars()
+                .all()
+            )
 
             job.total_repos = len(rs_rows)
             await session.commit()
@@ -252,7 +251,8 @@ async def run_group_index_job(
 
         except (GitLabAuthError, GitLabNotFoundError, GitLabRateLimitError) as exc:
             await _update_group_job(
-                session, job,
+                session,
+                job,
                 status=GroupIndexStatus.FAILED.value,
                 step=f"Error de GitLab: {exc}",
                 error_summary=str(exc),
@@ -261,7 +261,8 @@ async def run_group_index_job(
         except Exception as exc:
             logger.exception("Unexpected error in group job %d discovery phase", group_job_id)
             await _update_group_job(
-                session, job,
+                session,
+                job,
                 status=GroupIndexStatus.FAILED.value,
                 step=f"Error inesperado: {exc}",
                 error_summary=str(exc),
@@ -272,7 +273,8 @@ async def run_group_index_job(
     async with AsyncSessionLocal() as session:
         job = await session.get(GroupIndexJob, group_job_id)
         await _update_group_job(
-            session, job,
+            session,
+            job,
             status=GroupIndexStatus.INDEXING.value,
             step=f"Indexando {len(paired)} repositorios (concurrencia={settings.group_concurrency})...",
         )
@@ -297,7 +299,8 @@ async def run_group_index_job(
     async with AsyncSessionLocal() as session:
         job = await session.get(GroupIndexJob, group_job_id)
         await _update_group_job(
-            session, job,
+            session,
+            job,
             status=GroupIndexStatus.GENERATING_OVERVIEW.value,
             step="Generando overview del grupo...",
         )
@@ -308,10 +311,10 @@ async def run_group_index_job(
 
     async with AsyncSessionLocal() as session:
         rs_rows = (
-            await session.execute(
-                select(GroupRepoStatus).where(GroupRepoStatus.group_job_id == group_job_id)
-            )
-        ).scalars().all()
+            (await session.execute(select(GroupRepoStatus).where(GroupRepoStatus.group_job_id == group_job_id)))
+            .scalars()
+            .all()
+        )
 
         for rs in rs_rows:
             if rs.repository_id is None or rs.status != "done":
@@ -319,22 +322,23 @@ async def run_group_index_job(
             indexed_repo_ids.append(rs.repository_id)
             repo = await session.get(Repository, rs.repository_id)
             pages = (
-                await session.execute(
-                    select(WikiPage)
-                    .where(WikiPage.repository_id == rs.repository_id)
-                    .order_by(WikiPage.order)
-                    .limit(5)
+                (
+                    await session.execute(
+                        select(WikiPage)
+                        .where(WikiPage.repository_id == rs.repository_id)
+                        .order_by(WikiPage.order)
+                        .limit(5)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if repo and pages:
                 repo_summaries.append(
                     {
                         "name": repo.name,
                         "path": repo.project_path,
-                        "pages": [
-                            {"title": p.title, "content": p.content_markdown[:300]}
-                            for p in pages
-                        ],
+                        "pages": [{"title": p.title, "content": p.content_markdown[:300]} for p in pages],
                     }
                 )
 

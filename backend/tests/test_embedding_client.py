@@ -32,9 +32,7 @@ async def test_http_embedding_batch_preserves_index_order():
 
 @pytest.mark.asyncio
 async def test_http_embedding_errors_are_wrapped():
-    http = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda _request: httpx.Response(503, text="down"))
-    )
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _request: httpx.Response(503, text="down")))
     client = EmbeddingClient(url="https://embeddings.test", http_client=http)
     with pytest.raises(EmbeddingError):
         await client.embed_one("hello")

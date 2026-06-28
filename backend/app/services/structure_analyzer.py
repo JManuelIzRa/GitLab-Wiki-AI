@@ -7,6 +7,7 @@ contexto estructurado en vez de tener que "adivinar" todo desde cero,
 y permite generar partes del wiki (árbol de módulos, stack tecnológico)
 sin gastar tokens.
 """
+
 from __future__ import annotations
 
 import os
@@ -14,14 +15,43 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 EXTENSION_LANGUAGE = {
-    ".py": "Python", ".js": "JavaScript", ".jsx": "JavaScript", ".ts": "TypeScript",
-    ".tsx": "TypeScript", ".java": "Java", ".kt": "Kotlin", ".go": "Go", ".rs": "Rust",
-    ".rb": "Ruby", ".php": "PHP", ".cs": "C#", ".cpp": "C++", ".c": "C", ".h": "C/C++ Header",
-    ".swift": "Swift", ".m": "Objective-C", ".scala": "Scala", ".vue": "Vue",
-    ".sql": "SQL", ".sh": "Shell", ".yml": "YAML", ".yaml": "YAML", ".json": "JSON",
-    ".tf": "Terraform", ".dockerfile": "Docker", ".ex": "Elixir", ".exs": "Elixir",
-    ".elm": "Elm", ".clj": "Clojure", ".cljs": "ClojureScript", ".hs": "Haskell",
-    ".ml": "OCaml", ".mli": "OCaml", ".dart": "Dart", ".lua": "Lua", ".r": "R",
+    ".py": "Python",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".java": "Java",
+    ".kt": "Kotlin",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".rb": "Ruby",
+    ".php": "PHP",
+    ".cs": "C#",
+    ".cpp": "C++",
+    ".c": "C",
+    ".h": "C/C++ Header",
+    ".swift": "Swift",
+    ".m": "Objective-C",
+    ".scala": "Scala",
+    ".vue": "Vue",
+    ".sql": "SQL",
+    ".sh": "Shell",
+    ".yml": "YAML",
+    ".yaml": "YAML",
+    ".json": "JSON",
+    ".tf": "Terraform",
+    ".dockerfile": "Docker",
+    ".ex": "Elixir",
+    ".exs": "Elixir",
+    ".elm": "Elm",
+    ".clj": "Clojure",
+    ".cljs": "ClojureScript",
+    ".hs": "Haskell",
+    ".ml": "OCaml",
+    ".mli": "OCaml",
+    ".dart": "Dart",
+    ".lua": "Lua",
+    ".r": "R",
 }
 
 DEPENDENCY_MANIFESTS = {
@@ -55,40 +85,77 @@ MONOREPO_WORKSPACE_FILES = {
 }
 
 IGNORED_DIR_PARTS = {
-    "node_modules", ".git", "dist", "build", "vendor", "__pycache__",
-    ".venv", "venv", "target", ".idea", ".vscode", "coverage",
-    ".next", ".nuxt", ".output", "out", "tmp", ".tmp",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "target",
+    ".idea",
+    ".vscode",
+    "coverage",
+    ".next",
+    ".nuxt",
+    ".output",
+    "out",
+    "tmp",
+    ".tmp",
 }
 
 ENTRYPOINT_HINTS = {
     # Python
-    "main.py", "app.py", "manage.py", "wsgi.py", "asgi.py", "server.py", "run.py",
+    "main.py",
+    "app.py",
+    "manage.py",
+    "wsgi.py",
+    "asgi.py",
+    "server.py",
+    "run.py",
     # JavaScript / TypeScript
-    "index.js", "server.js", "main.ts", "index.ts",
-    "src/index.js", "src/index.ts", "src/main.js", "src/main.ts",
+    "index.js",
+    "server.js",
+    "main.ts",
+    "index.ts",
+    "src/index.js",
+    "src/index.ts",
+    "src/main.js",
+    "src/main.ts",
     # Go
-    "main.go", "cmd/main.go",
+    "main.go",
+    "cmd/main.go",
     # Rust
-    "src/main.rs", "main.rs",
+    "src/main.rs",
+    "main.rs",
     # Java / Kotlin
-    "Main.java", "App.java", "Application.java",
-    "Main.kt", "App.kt", "Application.kt",
+    "Main.java",
+    "App.java",
+    "Application.java",
+    "Main.kt",
+    "App.kt",
+    "Application.kt",
     # Ruby
-    "config.ru", "app.rb",
+    "config.ru",
+    "app.rb",
     # PHP
-    "index.php", "public/index.php",
+    "index.php",
+    "public/index.php",
     # Elixir
     "lib/application.ex",
     # Dart / Flutter
     "lib/main.dart",
     # Generic
-    "Makefile", "makefile",
+    "Makefile",
+    "makefile",
 }
 
 
 @dataclass
 class ModuleInfo:
     """Agrupación lógica de archivos bajo un mismo directorio de primer/segundo nivel."""
+
     name: str
     path: str
     file_count: int = 0
@@ -138,20 +205,20 @@ def _detect_monorepo(file_paths: list[str], package_manifest_paths: list[str]) -
     for wf in MONOREPO_WORKSPACE_FILES:
         if wf in basenames:
             # Workspace roots are first-level directories that have their own package manifest
-            roots = sorted({
-                p.split("/")[0]
-                for p in package_manifest_paths
-                if "/" in p and p.split("/")[0] not in {".", ""}
-            })
+            roots = sorted(
+                {p.split("/")[0] for p in package_manifest_paths if "/" in p and p.split("/")[0] not in {".", ""}}
+            )
             return True, roots or None
 
     # Condition 2: multiple package manifests in distinct subdirectories
-    manifest_dirs = sorted({
-        os.path.dirname(p)
-        for p in package_manifest_paths
-        if os.path.basename(p) in {"package.json", "pyproject.toml", "go.mod", "Cargo.toml"}
-        and os.path.dirname(p) not in {"", "."}
-    })
+    manifest_dirs = sorted(
+        {
+            os.path.dirname(p)
+            for p in package_manifest_paths
+            if os.path.basename(p) in {"package.json", "pyproject.toml", "go.mod", "Cargo.toml"}
+            and os.path.dirname(p) not in {"", "."}
+        }
+    )
     if len(manifest_dirs) >= 3:
         return True, manifest_dirs[:20]
 
@@ -173,9 +240,6 @@ def analyze_structure(file_paths: list[str]) -> RepoStructure:
     readme_path: str | None = None
     modules_map: dict[str, ModuleInfo] = {}
 
-    # Build a fast lookup for entrypoint detection (full paths and basenames)
-    file_set = set(file_paths)
-
     for path in file_paths:
         base = os.path.basename(path)
 
@@ -195,8 +259,14 @@ def analyze_structure(file_paths: list[str]) -> RepoStructure:
             entrypoints.append(path)
 
         if (
-            base.lower() in ("dockerfile", "docker-compose.yml", "docker-compose.yaml",
-                             "docker-compose.override.yml", "docker-compose.prod.yml")
+            base.lower()
+            in (
+                "dockerfile",
+                "docker-compose.yml",
+                "docker-compose.yaml",
+                "docker-compose.override.yml",
+                "docker-compose.prod.yml",
+            )
             or ".gitlab-ci" in base
             or base in (".travis.yml", "Jenkinsfile", "circle.yml")
             or (base.endswith(".yml") and path.startswith(".github/"))

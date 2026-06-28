@@ -1,8 +1,11 @@
 """Tests for VectorStore + code_chunker using Qdrant in-memory mode (no server needed)."""
+
 import sys
+
 sys.path.insert(0, ".")
 
 import pytest
+
 from app.services.code_chunker import chunk_files
 from app.services.vector_store import VectorStore
 

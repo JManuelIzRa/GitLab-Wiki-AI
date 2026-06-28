@@ -8,6 +8,7 @@ Creates a graph where:
 This relies on data already stored in the DB (wiki pages + repo metadata)
 so it doesn't require additional API calls.
 """
+
 from __future__ import annotations
 
 import logging
@@ -36,21 +37,21 @@ async def build_cross_repo_graph(repo_ids: list[int]) -> dict:
         return {"nodes": [], "edges": []}
 
     async with AsyncSessionLocal() as session:
-        group_repos = (
-            await session.execute(
-                select(Repository).where(Repository.id.in_(repo_ids))
-            )
-        ).scalars().all()
+        group_repos = (await session.execute(select(Repository).where(Repository.id.in_(repo_ids)))).scalars().all()
 
         # All repos outside this group that are already indexed in Qdrant.
         external_repos = (
-            await session.execute(
-                select(Repository).where(
-                    Repository.id.notin_(repo_ids),
-                    Repository.indexed_in_qdrant.is_(True),
+            (
+                await session.execute(
+                    select(Repository).where(
+                        Repository.id.notin_(repo_ids),
+                        Repository.indexed_in_qdrant.is_(True),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         nodes: list[str] = [r.name for r in group_repos]
         edges: list[dict] = []
@@ -59,10 +60,10 @@ async def build_cross_repo_graph(repo_ids: list[int]) -> dict:
 
         for repo in group_repos:
             pages = (
-                await session.execute(
-                    select(WikiPage.content_markdown).where(WikiPage.repository_id == repo.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(WikiPage.content_markdown).where(WikiPage.repository_id == repo.id)))
+                .scalars()
+                .all()
+            )
             combined_text = " ".join(pages).lower()
 
             # Internal deps — within the same group.
@@ -71,9 +72,7 @@ async def build_cross_repo_graph(repo_ids: list[int]) -> dict:
                     continue
                 other_name = other.name.lower()
                 other_path_base = other.project_path.lower().split("/")[-1]
-                if other_name in combined_text or (
-                    len(other_path_base) > 3 and other_path_base in combined_text
-                ):
+                if other_name in combined_text or (len(other_path_base) > 3 and other_path_base in combined_text):
                     key = (repo.name, other.name)
                     if key not in seen_edges:
                         seen_edges.add(key)
@@ -83,18 +82,18 @@ async def build_cross_repo_graph(repo_ids: list[int]) -> dict:
             for other in external_repos:
                 other_name = other.name.lower()
                 other_path_base = other.project_path.lower().split("/")[-1]
-                if other_name in combined_text or (
-                    len(other_path_base) > 3 and other_path_base in combined_text
-                ):
+                if other_name in combined_text or (len(other_path_base) > 3 and other_path_base in combined_text):
                     key = (repo.name, other.name)
                     if key not in seen_edges:
                         seen_edges.add(key)
-                        edges.append({
-                            "source": repo.name,
-                            "target": other.name,
-                            "weight": 1,
-                            "external": True,
-                        })
+                        edges.append(
+                            {
+                                "source": repo.name,
+                                "target": other.name,
+                                "weight": 1,
+                                "external": True,
+                            }
+                        )
                         if other.name not in external_nodes_added:
                             external_nodes_added.add(other.name)
                             nodes.append(other.name)

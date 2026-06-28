@@ -1,4 +1,5 @@
 """DB-backed LRU chat-answer cache shared between route modules."""
+
 from __future__ import annotations
 
 import hashlib
