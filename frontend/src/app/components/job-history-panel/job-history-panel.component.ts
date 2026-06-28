@@ -1,3 +1,4 @@
+import { DatePipe } from '@angular/common';
 import {
   Component,
   Output,
@@ -5,6 +6,7 @@ import {
   signal,
   inject,
   AfterViewInit,
+  ViewChild,
 } from '@angular/core';
 import { ApiService, IndexJobResponse } from '../../services/api.service';
 import { RepoService } from '../../services/repo.service';
@@ -13,7 +15,7 @@ import { gitLabCommitUrl } from '../../utils/gitlab-url';
 @Component({
   selector: 'app-job-history-panel',
   standalone: true,
-  imports: [],
+  imports: [DatePipe],
   templateUrl: './job-history-panel.component.html',
   styleUrls: ['./job-history-panel.component.css'],
 })

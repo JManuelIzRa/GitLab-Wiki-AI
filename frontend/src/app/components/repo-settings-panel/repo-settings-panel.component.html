@@ -23,7 +23,7 @@
       <span class="field-name">Token GitLab para webhooks</span>
       <span class="field-hint">
         PAT almacenado en el servidor para re-indexado automático vía webhooks de GitLab.
-        @if ((repository() as any)?.gitlab_token_set) {
+        @if (repository()?.['gitlab_token_set']) {
           ✓ Ya configurado.
         } @else {
           No configurado.
@@ -34,7 +34,7 @@
         class="input"
         [value]="gitlabToken()"
         (input)="gitlabToken.set($any($event.target).value)"
-        [placeholder]="(repository() as any)?.gitlab_token_set ? '(dejar vacío para no cambiar)' : 'glpat-xxxxxxxxxxxxxxxxxxxx'"
+        [placeholder]="repository()?.['gitlab_token_set'] ? '(dejar vacío para no cambiar)' : 'glpat-xxxxxxxxxxxxxxxxxxxx'"
       />
     </label>
 

@@ -7,12 +7,30 @@ import {
   AfterViewInit,
 } from '@angular/core';
 
-const SHORTCUTS = [
-  { keys: ['?'], description: 'Mostrar / ocultar este panel de atajos' },
-  { keys: ['/'], description: 'Enfocar la búsqueda del sidebar' },
-  { keys: ['Alt', '←'], description: 'Página anterior del wiki' },
-  { keys: ['Alt', '→'], description: 'Página siguiente del wiki' },
-  { keys: ['Esc'], description: 'Cerrar modales / quitar foco del buscador' },
+interface ShortcutEntry {
+  keys: string[];
+  description: string;
+  category: string;
+}
+
+interface ShortcutGroup {
+  name: string;
+  shortcuts: ShortcutEntry[];
+}
+
+const SHORTCUTS: ShortcutEntry[] = [
+  { keys: ['Alt', '←'], description: 'Página anterior del wiki', category: 'Navegación' },
+  { keys: ['Alt', '→'], description: 'Página siguiente del wiki', category: 'Navegación' },
+  { keys: ['/'], description: 'Enfocar la búsqueda del sidebar', category: 'Búsqueda y comandos' },
+  { keys: ['Cmd', 'K'], description: 'Abrir paleta de comandos', category: 'Búsqueda y comandos' },
+  { keys: ['?'], description: 'Mostrar / ocultar este panel de atajos', category: 'Paneles y modales' },
+  { keys: ['Esc'], description: 'Cerrar modales / quitar foco del buscador', category: 'Paneles y modales' },
+];
+
+const CATEGORIES: ShortcutGroup[] = [
+  { name: 'Navegación', shortcuts: SHORTCUTS.filter(s => s.category === 'Navegación') },
+  { name: 'Búsqueda y comandos', shortcuts: SHORTCUTS.filter(s => s.category === 'Búsqueda y comandos') },
+  { name: 'Paneles y modales', shortcuts: SHORTCUTS.filter(s => s.category === 'Paneles y modales') },
 ];
 
 @Component({

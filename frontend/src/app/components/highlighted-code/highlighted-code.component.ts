@@ -1,3 +1,4 @@
+import { NgStyle } from '@angular/common';
 import {
   Component,
   ElementRef,
@@ -14,7 +15,7 @@ interface LineProps {
 @Component({
   selector: 'app-highlighted-code',
   standalone: true,
-  imports: [],
+  imports: [NgStyle],
   templateUrl: './highlighted-code.component.html',
   styleUrls: ['./highlighted-code.component.css'],
 })
@@ -41,7 +42,7 @@ export class HighlightedCodeComponent implements OnChanges {
       lines.pop();
     }
 
-    this.processedLines = lines.map((line, i) => {
+    this.processedLines = lines.map((line: string, i: number) => {
       const lineNumber = this.startingLineNumber + i;
       const propsStyle = this.lineProps ? this.lineProps(lineNumber).style || {} : {};
       return {

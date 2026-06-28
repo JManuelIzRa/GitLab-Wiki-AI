@@ -80,7 +80,7 @@
         </div>
       }
 
-      @if (loading() && !messages()[messages().length - 1]?.streaming) {
+      @if (loading() && !messages().at(-1)?.streaming) {
         <div class="message thinking">pensando…</div>
       }
     </div>

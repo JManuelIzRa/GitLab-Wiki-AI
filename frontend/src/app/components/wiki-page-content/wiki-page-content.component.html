@@ -5,7 +5,7 @@
     }
 
     <div class="page-header">
-      <h1 class="h1">{{ (p as any).title }}</h1>
+      <h1 class="h1">{{ p['title'] }}</h1>
       <div class="page-actions">
         @if (!isEditing()) {
           <button class="action-button" (click)="showPushDialog.set(true)" title="Publicar en GitLab Wiki">
@@ -17,8 +17,8 @@
           <button class="action-button edit-btn" (click)="handleEditStart()" title="Editar página (E)">
             ✎ Editar
           </button>
-          @if ((p as any).is_ai_generated) {
-            <button class="action-button" (click)="repoService.handleRegeneratePage((p as any).slug)" title="Regenerar solo esta página">
+          @if (p['is_ai_generated']) {
+            <button class="action-button" (click)="repoService.handleRegeneratePage(p['slug'])" title="Regenerar solo esta página">
               ↻ Regenerar
             </button>
           }
@@ -63,11 +63,11 @@
       }
     }
 
-    @if ((p as any).source_files?.length > 0) {
+    @if (p['source_files'].length > 0) {
       <div class="sources-box">
         <div class="sources-label">archivos fuente</div>
         <div class="sources-list">
-          @for (f of (p as any).source_files; track f) {
+          @for (f of p['source_files']; track f) {
             @if (gitLabSourceUrl(f); as href) {
               <a [href]="href" target="_blank" rel="noreferrer" class="source-tag">{{ f }} ↗</a>
             } @else {
@@ -80,9 +80,9 @@
 
     @if (showRevisions()) {
       <app-revision-panel
-        [repoId]="(repository() as any)?.id"
-        [slug]="(p as any).slug"
-        [currentContent]="(p as any).content_markdown"
+        [repoId]="(repository()?.['id'] ?? 0)"
+        [slug]="p['slug']"
+        [currentContent]="p['content_markdown']"
         (restore)="handleRestored($event)"
         (close)="showRevisions.set(false)"
       />
@@ -90,7 +90,7 @@
 
     @if (showPushDialog()) {
       <app-push-to-gitlab-dialog
-        [repoId]="(repository() as any)?.id"
+        [repoId]="(repository()?.['id'] ?? 0)"
         (close)="showPushDialog.set(false)"
       />
     }

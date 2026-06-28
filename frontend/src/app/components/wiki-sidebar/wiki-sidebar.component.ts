@@ -44,7 +44,7 @@ export class WikiSidebarComponent implements OnInit, OnDestroy {
   @ViewChild('searchInput') searchInputRef!: ElementRef<HTMLInputElement>;
 
   private api = inject(ApiService);
-  private repoService = inject(RepoService);
+  repoService = inject(RepoService);
 
   repository = this.repoService.repository;
   pages = this.repoService.pages;
@@ -169,5 +169,9 @@ export class WikiSidebarComponent implements OnInit, OnDestroy {
 
   onReindex(): void {
     this.reindex.emit();
+  }
+
+  printPage(): void {
+    window.print();
   }
 }

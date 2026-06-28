@@ -20,7 +20,7 @@
       <div class="repo-path">{{ repo['project_path'] }}</div>
       <div class="repo-meta">
         <span class="branch-tag">{{ repo['default_branch'] }}</span>
-        <span class="sha-tag">{{ (repo['last_commit_sha'] as string)?.slice(0, 8) }}</span>
+        <span class="sha-tag">{{ repo['last_commit_sha'].slice(0, 8) }}</span>
       </div>
       <div
         class="rag-tag"
@@ -49,7 +49,7 @@
       <div class="export-row">
         <a [href]="exportUrl()" download class="export-btn" title="Descargar como Markdown">↓ .md</a>
         <a [href]="htmlExportUrl()" download class="export-btn" title="Descargar como HTML">↓ .html</a>
-        <button class="export-btn" title="Imprimir la página actual / guardar como PDF" (click)="window.print()">⎙ pdf</button>
+        <button class="export-btn" title="Imprimir la página actual / guardar como PDF" (click)="printPage()">⎙ pdf</button>
       </div>
     }
   </div>

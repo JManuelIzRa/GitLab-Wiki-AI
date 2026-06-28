@@ -439,6 +439,10 @@ export class RepoService {
     this.setState({ activeSlug: slug });
   }
 
+  setActivePage(page: WikiPageDetail | null): void {
+    this.setState({ activePage: page });
+  }
+
   toggleShortcutsOpen(): void {
     this.setState({ shortcutsOpen: !this.snap.shortcutsOpen });
   }

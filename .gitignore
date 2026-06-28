@@ -30,6 +30,8 @@ lerna-debug.log*
 # --- Editor / OS ---
 .vscode/
 .idea/
+.omo/
+.opencode/
 .DS_Store
 *.log
 *.local

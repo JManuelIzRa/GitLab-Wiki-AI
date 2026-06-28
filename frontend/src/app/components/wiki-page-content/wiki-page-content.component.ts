@@ -33,7 +33,7 @@ interface MarkdownBlock {
   styleUrls: ['./wiki-page-content.component.css'],
 })
 export class WikiPageContentComponent implements OnDestroy {
-  private repoService = inject(RepoService);
+  repoService = inject(RepoService);
   private api = inject(ApiService);
   private sanitizer = inject(DomSanitizer);
 
@@ -185,7 +185,7 @@ export class WikiPageContentComponent implements OnDestroy {
       const result = await this.api
         .updateWikiPage(repo.id, p.slug, this.editedContent())
         .toPromise();
-      this.repoService.activePage.set(result as any);
+      this.repoService.setActivePage(result as any);
       this.isEditing.set(false);
       this.showToast('Guardado correctamente');
     } catch (err: unknown) {
@@ -203,7 +203,7 @@ export class WikiPageContentComponent implements OnDestroy {
   }
 
   handleRestored(restoredPage: unknown): void {
-    this.repoService.activePage.set(restoredPage as any);
+    this.repoService.setActivePage(restoredPage as any);
     this.showToast('Revisión restaurada');
   }
 

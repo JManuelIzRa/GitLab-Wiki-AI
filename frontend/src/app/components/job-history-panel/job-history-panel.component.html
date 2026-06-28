@@ -4,7 +4,7 @@
       <header>
         <div>
           <strong>Historial de indexado</strong>
-          <small>{{ (repo as any).project_path }}</small>
+          <small>{{ repo['project_path'] }}</small>
         </div>
         <button (click)="close.emit()">✕</button>
       </header>
@@ -13,7 +13,7 @@
         <div>
           <span>Commit indexado </span>
           @if (gitLabCommitUrl(); as url) {
-            <a [href]="url" target="_blank" rel="noreferrer">{{ (repo as any).last_commit_sha?.slice(0, 8) }} ↗</a>
+            <a [href]="url" target="_blank" rel="noreferrer">{{ repo['last_commit_sha'].slice(0, 8) }} ↗</a>
           } @else {
             —
           }

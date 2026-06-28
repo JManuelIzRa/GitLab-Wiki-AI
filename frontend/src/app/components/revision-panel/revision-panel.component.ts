@@ -1,3 +1,4 @@
+import { DatePipe } from '@angular/common';
 import {
   Component,
   Input,
@@ -44,7 +45,7 @@ function computeLineDiff(aText: string, bText: string): { type: string; line: st
 @Component({
   selector: 'app-revision-panel',
   standalone: true,
-  imports: [],
+  imports: [DatePipe],
   templateUrl: './revision-panel.component.html',
   styleUrls: ['./revision-panel.component.css'],
 })

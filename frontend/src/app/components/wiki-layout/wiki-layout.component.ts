@@ -12,18 +12,28 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { RepoService } from '../../services/repo.service';
-
-export interface PaletteAction {
-  id: string;
-  label: string;
-  hint: string;
-  run: () => void;
-}
+import { WikiSidebarComponent } from '../wiki-sidebar/wiki-sidebar.component';
+import { WikiPageContentComponent } from '../wiki-page-content/wiki-page-content.component';
+import { AskPanelComponent } from '../ask-panel/ask-panel.component';
+import { CodeSearchComponent } from '../code-search/code-search.component';
+import { DependencyGraphViewComponent } from '../dependency-graph-view/dependency-graph-view.component';
+import { JobHistoryPanelComponent } from '../job-history-panel/job-history-panel.component';
+import { KeyboardShortcutsModalComponent } from '../keyboard-shortcuts-modal/keyboard-shortcuts-modal.component';
+import { CommandPaletteComponent, CommandPaletteAction } from '../command-palette/command-palette.component';
 
 @Component({
   selector: 'app-wiki-layout',
   standalone: true,
-  imports: [],
+  imports: [
+    WikiSidebarComponent,
+    WikiPageContentComponent,
+    AskPanelComponent,
+    CodeSearchComponent,
+    DependencyGraphViewComponent,
+    JobHistoryPanelComponent,
+    KeyboardShortcutsModalComponent,
+    CommandPaletteComponent,
+  ],
   templateUrl: './wiki-layout.component.html',
   styleUrls: ['./wiki-layout.component.css'],
 })
@@ -56,7 +66,7 @@ export class WikiLayoutComponent implements OnInit, OnDestroy {
   private paramSub: Subscription | null = null;
   private loadEffect: EffectRef | null = null;
 
-  readonly paletteActions: PaletteAction[] = [
+  readonly paletteActions: CommandPaletteAction[] = [
     {
       id: 'code-search',
       label: 'Buscar en el código',
