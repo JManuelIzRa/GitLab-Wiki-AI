@@ -1,0 +1,130 @@
+<div class="wrapper">
+  <div class="card">
+    <button class="backLink" (click)="goBack()">
+      ← ver repositorios indexados
+    </button>
+    <div class="eyebrow">
+      <span class="dot"></span>
+      DeepWiki · GitLab / {{ isReindex ? 'reindexar' : 'nuevo índice' }}
+    </div>
+
+    <h1 class="title">{{ isReindex ? 'Reindexar repositorio' : 'Indexa un repositorio' }}</h1>
+    <p class="subtitle">
+      @if (isReindex) {
+        Vuelve a comprobar este repo. Si no hubo cambios desde el último indexado, el wiki existente se mantiene sin gastar tiempo ni tokens de más.
+      } @else {
+        Conecta cualquier instancia de GitLab —self-hosted o gitlab.com— y genera un wiki navegable a partir del código real del proyecto.
+      }
+    </p>
+
+    <form [formGroup]="form" (ngSubmit)="handleSubmit($event)" class="form">
+      <label class="fieldLabel">
+        <span class="fieldLabelText">URL de la instancia GitLab</span>
+        <span class="fieldHint">ej. https://gitlab.tuempresa.com</span>
+        <input
+          type="text"
+          formControlName="gitlabUrl"
+          placeholder="https://gitlab.com"
+          class="input"
+          [class.inputLocked]="isReindex"
+          [class.inputError]="form.get('gitlabUrl')?.errors && form.get('gitlabUrl')?.touched"
+          required
+        />
+        @if (form.get('gitlabUrl')?.errors?.['custom']; as urlErr) {
+          <span class="fieldError">{{ urlErr }}</span>
+        }
+      </label>
+
+      <label class="fieldLabel">
+        <span class="fieldLabelText">Ruta del proyecto</span>
+        <span class="fieldHint">grupo/subgrupo/proyecto, sin la URL</span>
+        <input
+          type="text"
+          formControlName="projectPath"
+          placeholder="mi-grupo/mi-proyecto"
+          class="input"
+          [class.inputLocked]="isReindex"
+          [class.inputError]="form.get('projectPath')?.errors && form.get('projectPath')?.touched"
+          required
+        />
+        @if (form.get('projectPath')?.errors?.['custom']; as pathErr) {
+          <span class="fieldError">{{ pathErr }}</span>
+        }
+      </label>
+
+      <label class="fieldLabel">
+        <span class="fieldLabelText">Personal Access Token</span>
+        <span class="fieldHint">scopes: read_api, read_repository</span>
+        <div class="tokenRow">
+          <input
+            [type]="showToken() ? 'text' : 'password'"
+            formControlName="privateToken"
+            placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+            class="input"
+            required
+          />
+          <button
+            type="button"
+            class="toggleBtn"
+            (click)="toggleShowToken()"
+            [attr.aria-label]="showToken() ? 'Ocultar token' : 'Mostrar token'"
+          >
+            {{ showToken() ? 'ocultar' : 'ver' }}
+          </button>
+        </div>
+      </label>
+
+      <label class="fieldLabel">
+        <span class="fieldLabelText">Branch (opcional)</span>
+        <span class="fieldHint">selecciona un branch existente o escríbelo manualmente</span>
+        <div class="tokenRow">
+          @if (branches().length > 0) {
+            <select formControlName="branch" class="input">
+              <option value="">(branch por defecto)</option>
+              @for (b of branches(); track b) {
+                <option [value]="b">{{ b }}</option>
+              }
+            </select>
+          } @else {
+            <input
+              type="text"
+              formControlName="branch"
+              placeholder="main"
+              class="input"
+            />
+          }
+          <button
+            type="button"
+            class="toggleBtn"
+            (click)="fetchBranches()"
+            [disabled]="branchesLoading()"
+            title="Cargar ramas disponibles del repositorio"
+          >
+            {{ branchesLoading() ? '…' : '↓ ramas' }}
+          </button>
+        </div>
+        @if (branchesError(); as err) {
+          <span class="branchError">{{ err }}</span>
+        }
+      </label>
+
+      @if (repoService.submitError(); as err) {
+        <div class="errorBox">{{ err }}</div>
+      }
+
+      <button type="submit" class="submitBtn" [disabled]="repoService.isSubmitting()">
+        @if (repoService.isSubmitting()) {
+          Iniciando...
+        } @else if (isReindex) {
+          Comprobar y reindexar →
+        } @else {
+          Generar wiki →
+        }
+      </button>
+    </form>
+
+    <p class="footnote">
+      El token nunca se almacena: se usa una sola vez para esta sesión de indexado.
+    </p>
+  </div>
+</div>

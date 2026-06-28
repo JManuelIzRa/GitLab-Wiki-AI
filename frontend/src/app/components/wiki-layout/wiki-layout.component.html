@@ -1,0 +1,174 @@
+@if (repository()) {
+  <div class="wiki-layout">
+    <!-- Mobile menu button -->
+    <button
+      class="mobile-menu-button"
+      (click)="mobileNavOpen.set(true)"
+      aria-label="Abrir navegación"
+    >
+      ☰
+    </button>
+
+    <!-- Mobile nav backdrop -->
+    @if (mobileNavOpen()) {
+      <button
+        class="mobile-nav-backdrop"
+        (click)="mobileNavOpen.set(false)"
+        aria-label="Cerrar navegación"
+      ></button>
+    }
+
+    <!-- Sidebar (placeholder — will be a child component) -->
+    <aside class="wiki-sidebar" [class.is-open]="mobileNavOpen()">
+      <div class="sidebar-inner">
+        <div class="sidebar-header">
+          <div class="sidebar-repo-name">
+            {{ repoName() }}
+          </div>
+          <button class="sidebar-close" (click)="mobileNavOpen.set(false)" aria-label="Cerrar">
+            ✕
+          </button>
+        </div>
+
+        <nav class="sidebar-nav">
+          @for (page of pages(); track page.slug) {
+            <button
+              class="sidebar-page-link"
+              [class.active]="page.slug === activeSlug()"
+              (click)="onPageClick(page.slug)"
+            >
+              {{ page.title || page.slug }}
+            </button>
+          }
+        </nav>
+
+        <div class="sidebar-actions">
+          <button class="sidebar-action-btn" (click)="handleReindex()">
+            Reindexar
+          </button>
+          <button class="sidebar-action-btn sidebar-action-btn--reset" (click)="handleReset()">
+            Mis repos
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main content area -->
+    <main class="wiki-main">
+      <!-- Skeleton: loading and no page yet -->
+      @if (pageLoading() && !activePage()) {
+        <div class="page-skeleton">
+          <div class="sk-block" style="width: 55%; height: 36px; margin-bottom: 28px"></div>
+          <div class="sk-block" style="width: 100%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 92%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 80%; height: 14px; margin-bottom: 32px"></div>
+          <div class="sk-block" style="width: 35%; height: 22px; margin-bottom: 18px"></div>
+          <div class="sk-block" style="width: 100%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 88%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 100%; height: 96px; margin-bottom: 32px"></div>
+          <div class="sk-block" style="width: 40%; height: 22px; margin-bottom: 18px"></div>
+          <div class="sk-block" style="width: 100%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 76%; height: 14px"></div>
+        </div>
+      }
+
+      <!-- Loading bar when page already exists but is refreshing -->
+      @if (pageLoading() && activePage()) {
+        <div class="loading-bar">
+          <div class="loading-bar-inner"></div>
+        </div>
+      }
+
+      <!-- Active page content (placeholder — will be WikiPageContentComponent) -->
+      @if (activePage(); as page) {
+        <article class="wiki-article">
+          <h1 class="wiki-page-title">{{ page.title || page.slug }}</h1>
+          <div class="wiki-page-content">
+            <pre>{{ page.content_markdown }}</pre>
+          </div>
+        </article>
+      }
+    </main>
+
+    <!-- Ask Panel placeholder -->
+    <aside class="ask-panel-placeholder">
+      <div class="ask-fab">💬</div>
+    </aside>
+
+    <!-- Modal overlays -->
+    @if (searchOpen()) {
+      <div class="modal-overlay" (click)="repoService.setSearchOpen(false)">
+        <div class="command-palette" (click)="$event.stopPropagation()">
+          <input placeholder="Buscar código…" autofocus />
+          <div class="command-results">
+            <p>Escribe para buscar en el código fuente.</p>
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (graphOpen()) {
+      <div class="modal-overlay" (click)="repoService.setGraphOpen(false)">
+        <div class="history-panel" (click)="$event.stopPropagation()">
+          <header>
+            <div>
+              <strong>Grafo de dependencias</strong>
+            </div>
+            <button (click)="repoService.setGraphOpen(false)">✕</button>
+          </header>
+          <p>Visualización del grafo de dependencias.</p>
+        </div>
+      </div>
+    }
+
+    @if (shortcutsOpen()) {
+      <div class="modal-overlay" (click)="repoService.setShortcutsOpen(false)">
+        <div class="history-panel" (click)="$event.stopPropagation()">
+          <header>
+            <div>
+              <strong>Atajos de teclado</strong>
+            </div>
+            <button (click)="repoService.setShortcutsOpen(false)">✕</button>
+          </header>
+          <table class="shortcuts-table">
+            <tr><td><kbd>?</kbd></td><td>Alternar esta ventana</td></tr>
+            <tr><td><kbd>Ctrl+K</kbd></td><td>Paleta de comandos</td></tr>
+            <tr><td><kbd>Alt+←</kbd></td><td>Página anterior</td></tr>
+            <tr><td><kbd>Alt+→</kbd></td><td>Página siguiente</td></tr>
+          </table>
+        </div>
+      </div>
+    }
+
+    @if (historyOpen()) {
+      <div class="modal-overlay" (click)="repoService.setHistoryOpen(false)">
+        <div class="history-panel" (click)="$event.stopPropagation()">
+          <header>
+            <div>
+              <strong>Historial de indexado</strong>
+            </div>
+            <button (click)="repoService.setHistoryOpen(false)">✕</button>
+          </header>
+          <p>Listado de trabajos de indexado.</p>
+        </div>
+      </div>
+    }
+
+    <!-- Command palette -->
+    @if (paletteOpen()) {
+      <div class="modal-overlay" (click)="repoService.setPaletteOpen(false)">
+        <div class="command-palette" (click)="$event.stopPropagation()">
+          <input placeholder="Comandos…" autofocus />
+          <div class="command-results">
+            @for (action of paletteActions; track action.id) {
+              <button (click)="action.run(); repoService.setPaletteOpen(false)">
+                <span>{{ action.label }}</span>
+                <small>{{ action.hint }}</small>
+              </button>
+            }
+          </div>
+        </div>
+      </div>
+    }
+  </div>
+}

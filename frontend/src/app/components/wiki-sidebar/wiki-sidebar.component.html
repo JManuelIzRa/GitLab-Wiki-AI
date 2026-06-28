@@ -1,0 +1,164 @@
+<aside
+  class="wiki-sidebar"
+  [class.is-open]="mobileOpen"
+>
+  <div class="repo-header">
+    <div class="top-row">
+      <button class="back-btn" (click)="onReset()" title="Ver todos los repositorios indexados">
+        ← mis repos
+      </button>
+      <div class="top-actions">
+        <button class="mobile-close-button" (click)="onClose()" aria-label="Cerrar navegación">✕</button>
+        <button class="theme-btn" (click)="showSettings.set(true)" title="Configuración del repositorio (prompt, token webhook)">
+          ⚙
+        </button>
+      </div>
+    </div>
+
+    @if (repository(); as repo) {
+      <div class="repo-name">{{ repo['name'] }}</div>
+      <div class="repo-path">{{ repo['project_path'] }}</div>
+      <div class="repo-meta">
+        <span class="branch-tag">{{ repo['default_branch'] }}</span>
+        <span class="sha-tag">{{ (repo['last_commit_sha'] as string)?.slice(0, 8) }}</span>
+      </div>
+      <div
+        class="rag-tag"
+        [class.rag-active]="repo['indexed_in_qdrant']"
+        [class.rag-inactive]="!repo['indexed_in_qdrant']"
+        [title]="repo['indexed_in_qdrant']
+          ? 'El código está indexado en Qdrant: las preguntas buscan en el código real'
+          : 'El código no se pudo indexar en Qdrant: las preguntas usan solo el wiki generado'"
+      >
+        <span class="rag-dot">●</span>
+        {{ repo['indexed_in_qdrant'] ? 'búsqueda semántica activa' : 'búsqueda semántica no disponible' }}
+      </div>
+
+      @if (lastIndexed(); as indexed) {
+        <div class="indexed-row">
+          <span class="indexed-at">indexado {{ indexed }}</span>
+          <button class="reindex-btn" (click)="onReindex()" title="Volver a indexar este repositorio">
+            ↺ reindexar
+          </button>
+        </div>
+      }
+
+      <button class="action-btn" (click)="repoService.setSearchOpen(true)">⌕ buscar en el código</button>
+      <button class="action-btn" (click)="repoService.setGraphOpen(true)">⊞ grafo de dependencias</button>
+      <button class="action-btn" (click)="repoService.setHistoryOpen(true)">◷ historial y frescura</button>
+      <div class="export-row">
+        <a [href]="exportUrl()" download class="export-btn" title="Descargar como Markdown">↓ .md</a>
+        <a [href]="htmlExportUrl()" download class="export-btn" title="Descargar como HTML">↓ .html</a>
+        <button class="export-btn" title="Imprimir la página actual / guardar como PDF" (click)="window.print()">⎙ pdf</button>
+      </div>
+    }
+  </div>
+
+  <div class="search-wrap">
+    <input
+      #searchInput
+      type="search"
+      placeholder="buscar… (tecla /)"
+      [value]="filter()"
+      (input)="onFilterChange($any($event.target).value)"
+      aria-label="Buscar en el wiki"
+    />
+    @if (displayedLoading()) {
+      <div class="search-spinner">…</div>
+    }
+  </div>
+
+  <nav class="nav">
+    @if (displayedResults(); as results) {
+      @if (results.length > 0) {
+        <div class="nav-section">
+          <div class="nav-section-label">resultados en el wiki</div>
+          <div class="nav-group">
+            @for (r of results; track r.slug) {
+              <button
+                class="nav-item nav-search-item"
+                [class.active]="r.slug === activeSlug()"
+                (click)="onSelectPage(r.slug)"
+              >
+                <div class="search-title">{{ r.title }}</div>
+                <div class="search-excerpt">{{ r.excerpt }}</div>
+              </button>
+            }
+          </div>
+        </div>
+      } @else if (filter().trim().length >= 2) {
+        <div class="no-results">sin resultados para "{{ filter() }}"</div>
+      }
+    } @else {
+      @if (filteredRoot().length === 0 && filteredModules().length === 0) {
+        <div class="no-results">sin resultados</div>
+      }
+
+      <div class="nav-group">
+        @for (page of filteredRoot(); track page.slug) {
+          <button
+            class="nav-item"
+            [class.active]="page.slug === activeSlug()"
+            [style.paddingLeft.px]="14"
+            (click)="onSelectPage(page.slug)"
+          >
+            {{ page.title }}
+          </button>
+        }
+      </div>
+
+      @if (filteredModules().length > 0 || (grouped().modules.length > 0 && !filter())) {
+        <div class="nav-section">
+          <button
+            class="section-header"
+            (click)="modulesCollapsed.set(!modulesCollapsed())"
+            [attr.aria-expanded]="!modulesCollapsed()"
+          >
+            <span class="nav-section-label">módulos</span>
+            <span class="collapse-icon">{{ modulesCollapsed() ? '▶' : '▼' }}</span>
+          </button>
+          @if (!modulesCollapsed()) {
+            <div class="nav-group">
+              @for (page of filteredModules(); track page.slug) {
+                <button
+                  class="nav-item"
+                  [class.active]="page.slug === activeSlug()"
+                  [style.paddingLeft.px]="28"
+                  (click)="onSelectPage(page.slug)"
+                >
+                  {{ page.title }}
+                </button>
+              }
+            </div>
+          }
+        </div>
+      }
+
+      @if (filter() && filteredModules().length > 0) {
+        <div class="nav-section">
+          <div class="nav-section-label">módulos</div>
+          <div class="nav-group">
+            @for (page of filteredModules(); track page.slug) {
+              <button
+                class="nav-item"
+                [class.active]="page.slug === activeSlug()"
+                [style.paddingLeft.px]="28"
+                (click)="onSelectPage(page.slug)"
+              >
+                {{ page.title }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+    }
+  </nav>
+
+  <div class="key-hint">
+    <span>/</span> buscar · <span>Alt+← / Alt+→</span> navegar · <span>?</span> atajos
+  </div>
+</aside>
+
+@if (showSettings()) {
+  <app-repo-settings-panel (close)="showSettings.set(false)" />
+}

@@ -1,0 +1,98 @@
+@if (page(); as p) {
+  <article class="wiki-article">
+    @if (toast(); as msg) {
+      <div class="toast">{{ msg }}</div>
+    }
+
+    <div class="page-header">
+      <h1 class="h1">{{ (p as any).title }}</h1>
+      <div class="page-actions">
+        @if (!isEditing()) {
+          <button class="action-button" (click)="showPushDialog.set(true)" title="Publicar en GitLab Wiki">
+            ↑ GitLab Wiki
+          </button>
+          <button class="action-button" (click)="showRevisions.set(true)" title="Ver historial de revisiones">
+            ◷ Historial
+          </button>
+          <button class="action-button edit-btn" (click)="handleEditStart()" title="Editar página (E)">
+            ✎ Editar
+          </button>
+          @if ((p as any).is_ai_generated) {
+            <button class="action-button" (click)="repoService.handleRegeneratePage((p as any).slug)" title="Regenerar solo esta página">
+              ↻ Regenerar
+            </button>
+          }
+        } @else {
+          <div class="edit-actions">
+            @if (saveError()) {
+              <span class="save-error">{{ saveError() }}</span>
+            }
+            <button class="save-btn" (click)="handleSave()" [disabled]="isSaving()">
+              ✓ {{ isSaving() ? 'Guardando…' : 'Guardar' }}
+            </button>
+            <button class="cancel-btn" (click)="handleCancel()" [disabled]="isSaving()">
+              ✕ Cancelar
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+
+    @if (isEditing()) {
+      <textarea
+        class="editor"
+        [value]="editedContent()"
+        (input)="editedContent.set($any($event.target).value)"
+        spellcheck="false"
+      ></textarea>
+    } @else {
+      @for (block of blocks(); track $index) {
+        @if (block.type === 'mermaid') {
+          <app-mermaid-diagram [code]="block.content" />
+        } @else if (block.type === 'code') {
+          <div class="code-wrapper">
+            <button class="copy-btn" (click)="copyCode(block.content)" title="Copiar código">⎘</button>
+            <app-highlighted-code
+              [language]="block.lang || 'text'"
+              [customStyle]="{ borderRadius: '8px', fontSize: '12.5px', border: '1px solid var(--border-subtle)', margin: '16px 0' }"
+            >{{ block.content }}</app-highlighted-code>
+          </div>
+        } @else if (block.type === 'html') {
+          <div class="markdown-body" [innerHTML]="markdownToHtml(block.content)"></div>
+        }
+      }
+    }
+
+    @if ((p as any).source_files?.length > 0) {
+      <div class="sources-box">
+        <div class="sources-label">archivos fuente</div>
+        <div class="sources-list">
+          @for (f of (p as any).source_files; track f) {
+            @if (gitLabSourceUrl(f); as href) {
+              <a [href]="href" target="_blank" rel="noreferrer" class="source-tag">{{ f }} ↗</a>
+            } @else {
+              <span class="source-tag">{{ f }}</span>
+            }
+          }
+        </div>
+      </div>
+    }
+
+    @if (showRevisions()) {
+      <app-revision-panel
+        [repoId]="(repository() as any)?.id"
+        [slug]="(p as any).slug"
+        [currentContent]="(p as any).content_markdown"
+        (restore)="handleRestored($event)"
+        (close)="showRevisions.set(false)"
+      />
+    }
+
+    @if (showPushDialog()) {
+      <app-push-to-gitlab-dialog
+        [repoId]="(repository() as any)?.id"
+        (close)="showPushDialog.set(false)"
+      />
+    }
+  </article>
+}

@@ -1,0 +1,156 @@
+:host {
+  display: block;
+}
+
+.wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+}
+
+.card {
+  width: 100%;
+  max-width: 480px;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  margin-bottom: 24px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot.active {
+  background: var(--accent-rust);
+}
+
+.dot.failed {
+  background: var(--accent-red);
+}
+
+.title {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 0 32px;
+  color: var(--text-primary);
+}
+
+.stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.stage-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.icon-base {
+  font-size: 12px;
+  width: 14px;
+  display: inline-block;
+  text-align: center;
+}
+
+.icon-done {
+  color: var(--accent-sage);
+}
+
+.icon-failed {
+  color: var(--accent-red);
+}
+
+.icon-active {
+  color: var(--accent-rust);
+}
+
+.icon-pending {
+  color: var(--border-strong);
+}
+
+.stage-label {
+  min-width: 150px;
+}
+
+.label-done {
+  color: var(--text-secondary);
+}
+
+.label-active {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.label-failed {
+  color: var(--accent-red);
+}
+
+.label-pending {
+  color: var(--text-tertiary);
+}
+
+.stage-detail {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.progress-bar-track {
+  height: 4px;
+  background: var(--bg-elevated-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  transition: width 0.4s ease;
+  border-radius: 2px;
+  background: var(--accent-rust);
+}
+
+.fill-failed {
+  background: var(--accent-red);
+}
+
+.progress-pct {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 8px;
+  text-align: right;
+}
+
+.error-box {
+  margin-top: 24px;
+  background: rgba(192, 89, 74, 0.1);
+  border: 1px solid var(--accent-red);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--text-error);
+  line-height: 1.6;
+}
+
+.error-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+  color: var(--accent-red);
+}

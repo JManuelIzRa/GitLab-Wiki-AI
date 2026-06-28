@@ -1,0 +1,56 @@
+<div class="wrapper">
+  <div class="card">
+    <div class="eyebrow">
+      <span class="dot" [class.failed]="isFailed" [class.active]="!isFailed"></span>
+      {{ projectPath() }}
+    </div>
+
+    <h1 class="title">{{ isFailed ? 'El indexado falló' : 'Indexando repositorio' }}</h1>
+
+    <div class="stage-list">
+      @for (stage of stages; track stage.key; let idx = $index) {
+        <div class="stage-row">
+          @if (stageState(idx) === 'done') {
+            <span class="icon-base icon-done">&#10003;</span>
+          } @else if (stageState(idx) === 'failed') {
+            <span class="icon-base icon-failed">&#10005;</span>
+          } @else if (stageState(idx) === 'active') {
+            <span class="icon-base icon-active pulse-dot">&#9679;</span>
+          } @else {
+            <span class="icon-base icon-pending">&#9675;</span>
+          }
+
+          <span
+            class="stage-label"
+            [class.label-done]="stageState(idx) === 'done'"
+            [class.label-active]="stageState(idx) === 'active'"
+            [class.label-failed]="stageState(idx) === 'failed'"
+            [class.label-pending]="stageState(idx) === 'pending'"
+          >
+            {{ stage.label }}
+          </span>
+
+          @if (stageState(idx) === 'active' && job()?.current_step) {
+            <span class="stage-detail">— {{ job()?.current_step }}</span>
+          }
+        </div>
+      }
+    </div>
+
+    <div class="progress-bar-track">
+      <div
+        class="progress-bar-fill"
+        [style.width.%]="job()?.progress ?? 0"
+        [class.fill-failed]="isFailed"
+      ></div>
+    </div>
+    <div class="progress-pct">{{ job()?.progress ?? 0 }}%</div>
+
+    @if (isFailed && job()?.error_message) {
+      <div class="error-box">
+        <div class="error-title">detalle del error</div>
+        {{ job()?.error_message }}
+      </div>
+    }
+  </div>
+</div>

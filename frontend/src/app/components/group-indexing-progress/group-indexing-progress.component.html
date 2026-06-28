@@ -1,0 +1,63 @@
+@if (loading() && !job()) {
+  <div class="wrapper">
+    <div class="card">
+      <p class="hint">Iniciando indexado del grupo…</p>
+    </div>
+  </div>
+} @else {
+  <div class="wrapper">
+    <div class="card">
+      <div class="eyebrow">
+        <span class="dot"></span>
+        DeepWiki · GitLab / indexando grupo
+      </div>
+
+      <h2 class="title">Indexando grupo</h2>
+      <p class="step">{{ job()?.current_step || 'Procesando...' }}</p>
+
+      <div class="bar-track">
+        <div
+          class="bar-fill"
+          [style.width.%]="pct"
+          [class.fill-failed]="isFailed"
+        ></div>
+      </div>
+      <p class="pct">
+        {{ job()?.completed_repos ?? 0 }} completados ·
+        {{ job()?.failed_repos ?? 0 }} fallidos ·
+        {{ job()?.total_repos ?? 0 }} total
+      </p>
+
+      @if (job()?.error_summary) {
+        <div class="error-box">
+          <strong>Errores:</strong>
+          <pre class="error-pre">{{ job()?.error_summary }}</pre>
+        </div>
+      }
+
+      @if (job()?.repo_statuses && job()?.repo_statuses!.length! > 0) {
+        <div class="repo-list">
+          <p class="repo-list-title">Repositorios</p>
+          @for (rs of job()?.repo_statuses; track rs.id) {
+            <div class="repo-row">
+              <span
+                class="status-dot"
+                [style.background]="statusColor(rs.status)"
+              ></span>
+              <span class="repo-path">{{ rs.project_path }}</span>
+              <span
+                class="status-label"
+                [style.color]="statusColor(rs.status)"
+              >
+                {{ rs.status }}
+              </span>
+              @if (rs.error_message) {
+                <span class="error-msg" [title]="rs.error_message">!</span>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
+}

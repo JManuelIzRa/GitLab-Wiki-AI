@@ -1,0 +1,110 @@
+.hint {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.submitBtn {
+  background: var(--accent-rust);
+  border: none;
+  border-radius: 6px;
+  padding: 13px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-on-rust);
+  cursor: pointer;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.listItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.itemMain {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.itemName {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemPath {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.reindexBtn {
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.deleteBtn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.deleteBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.errorBox {
+  background: rgba(192,89,74,0.12);
+  border: 1px solid var(--accent-red);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-error);
+  line-height: 1.5;
+}

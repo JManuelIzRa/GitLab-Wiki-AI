@@ -1,0 +1,43 @@
+:host {
+  display: block;
+}
+
+.highlighted-code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+  background: var(--code-bg, #1e1e1e);
+  border-radius: 6px;
+  padding: 12px 0;
+}
+
+.code-lines {
+  display: flex;
+  flex-direction: column;
+}
+
+.code-line {
+  display: flex;
+  align-items: flex-start;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.line-number {
+  display: inline-block;
+  min-width: 36px;
+  margin-right: 12px;
+  text-align: right;
+  color: var(--text-tertiary);
+  opacity: 0.5;
+  font-size: 0.9em;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.line-content {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

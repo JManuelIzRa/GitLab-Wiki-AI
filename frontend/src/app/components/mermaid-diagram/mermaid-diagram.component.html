@@ -1,0 +1,49 @@
+@if (error(); as err) {
+  <div class="mermaid-error">
+    <div class="mermaid-error-header">
+      <span>No se pudo renderizar el diagrama</span>
+      <button class="mermaid-retry-btn" (click)="onRetry()">reintentar</button>
+    </div>
+    <code class="error-detail">{{ err }}</code>
+    <details class="code-details">
+      <summary>ver código fuente</summary>
+      <pre class="raw-pre"><code>{{ code }}</code></pre>
+    </details>
+  </div>
+} @else {
+  <div class="mermaid-wrapper">
+    @if (isRendering()) {
+      <div class="mermaid-loading-overlay">
+        <div class="mermaid-loading-bar"></div>
+      </div>
+    }
+
+    <div
+      #container
+      class="mermaid-container"
+      [class.is-rendering]="isRendering()"
+      (click)="onZoom()"
+    ></div>
+
+    @if (!isRendering()) {
+      <button
+        class="diagram-action-btn"
+        [class.copied]="copied()"
+        (click)="onCopyCode($event)"
+        title="Copiar código"
+      >
+        {{ copied() ? '✓' : '⎘' }}
+      </button>
+    }
+  </div>
+
+  @if (zoomed()) {
+    <div class="zoom-overlay" (click)="onZoomClose()">
+      <div class="zoom-panel" (click)="$event.stopPropagation()">
+        <button class="zoom-close" (click)="onZoomClose()" title="Cerrar (Esc)">✕</button>
+        <button class="zoom-download-btn" (click)="onDownloadSVG()" title="Descargar SVG">↓</button>
+        <div class="zoom-content" [innerHTML]="svgSnapshot()"></div>
+      </div>
+    </div>
+  }
+}

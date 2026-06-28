@@ -1,0 +1,38 @@
+<div class="dialog-overlay">
+  <div class="dialog-panel">
+    <div class="dialog-header">
+      <span class="dialog-title">Publicar en GitLab Wiki</span>
+      <button class="close-btn" (click)="close.emit()">✕</button>
+    </div>
+
+    @if (status(); as s) {
+      <div class="status-content">
+        <p class="success-text">✓ {{ s.pages_pushed }} página(s) publicadas correctamente.</p>
+        @if (s.errors.length > 0) {
+          <div class="error-box">Errores: {{ s.errors.join('; ') }}</div>
+        }
+        <button class="save-btn" (click)="close.emit()">Cerrar</button>
+      </div>
+    } @else {
+      <p class="info-text">
+        Introduce un Personal Access Token de GitLab con scope <code>api</code> o <code>write_wiki</code>.
+      </p>
+      <input
+        type="password"
+        class="token-input"
+        [value]="token()"
+        (input)="token.set($any($event.target).value)"
+        placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+      />
+      @if (error()) {
+        <div class="error-box">{{ error() }}</div>
+      }
+      <div class="dialog-actions">
+        <button class="save-btn" (click)="handlePush()" [disabled]="pushing()">
+          ↑ {{ pushing() ? 'Publicando…' : 'Publicar' }}
+        </button>
+        <button class="cancel-btn" (click)="close.emit()" [disabled]="pushing()">Cancelar</button>
+      </div>
+    }
+  </div>
+</div>

@@ -1,0 +1,84 @@
+<div class="overlay">
+  <div class="panel">
+    <div class="header">
+      <span class="title">Configuración del repo</span>
+      <button class="close-btn" (click)="close.emit()">✕</button>
+    </div>
+
+    <label class="field-label">
+      <span class="field-name">Prompt de sistema personalizado</span>
+      <span class="field-hint">
+        Reemplaza el prompt de sistema predeterminado del LLM al generar el wiki. Vacío = usar el predeterminado. Requiere re-indexar.
+      </span>
+      <textarea
+        class="textarea"
+        [value]="systemPrompt()"
+        (input)="systemPrompt.set($any($event.target).value)"
+        placeholder="Eres un ingeniero senior que documenta repositorios de forma concisa y técnica..."
+        rows="5"
+      ></textarea>
+    </label>
+
+    <label class="field-label">
+      <span class="field-name">Token GitLab para webhooks</span>
+      <span class="field-hint">
+        PAT almacenado en el servidor para re-indexado automático vía webhooks de GitLab.
+        @if ((repository() as any)?.gitlab_token_set) {
+          ✓ Ya configurado.
+        } @else {
+          No configurado.
+        }
+      </span>
+      <input
+        type="password"
+        class="input"
+        [value]="gitlabToken()"
+        (input)="gitlabToken.set($any($event.target).value)"
+        [placeholder]="(repository() as any)?.gitlab_token_set ? '(dejar vacío para no cambiar)' : 'glpat-xxxxxxxxxxxxxxxxxxxx'"
+      />
+    </label>
+
+    <label class="field-label">
+      <span class="field-name">Idioma del wiki (por repo)</span>
+      <span class="field-hint">
+        Código ISO del idioma para generar el wiki de este repo (ej. "en", "fr", "de"). Vacío = usar el idioma global del servidor.
+      </span>
+      <input
+        type="text"
+        class="input"
+        [value]="wikiLanguage()"
+        (input)="wikiLanguage.set($any($event.target).value)"
+        placeholder="es, en, fr, de, pt… (vacío = global)"
+        maxlength="8"
+      />
+    </label>
+
+    <label class="field-label">
+      <span class="field-name">Overrides de plantillas de prompt</span>
+      <span class="field-hint">
+        JSON que sobreescribe claves específicas del prompt (overview, architecture, module, setup). Vacío = usar las plantillas del idioma configurado.
+      </span>
+      <textarea
+        class="textarea code-textarea"
+        [value]="promptOverridesRaw()"
+        (input)="promptOverridesRaw.set($any($event.target).value)"
+        placeholder='{\n  "overview": "Generate a concise overview…",\n  "setup": "Write setup steps…"\n}'
+        rows="5"
+      ></textarea>
+      @if (promptOverridesError()) {
+        <div class="error-inline">{{ promptOverridesError() }}</div>
+      }
+    </label>
+
+    @if (error()) {
+      <div class="error-box">{{ error() }}</div>
+    }
+
+    <div class="actions">
+      <button class="save-btn" (click)="handleSave()" [disabled]="saving()">
+        {{ saving() ? 'Guardando…' : saved() ? '✓ Guardado' : 'Guardar' }}
+      </button>
+      <button class="cancel-btn" (click)="close.emit()">Cerrar</button>
+    </div>
+  </div>
+</div>

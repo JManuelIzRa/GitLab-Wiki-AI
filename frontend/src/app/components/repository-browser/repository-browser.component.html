@@ -1,0 +1,113 @@
+<div class="wrapper">
+  <div class="card">
+    <div class="eyebrow">
+      <span class="dot"></span>
+      DeepWiki · GitLab
+    </div>
+
+    <div class="tabBar">
+      <button
+        class="tabBtn"
+        [class.tabBtnActive]="tab() === 'repos'"
+        (click)="setTab('repos')"
+      >
+        Repositorios
+      </button>
+      <button
+        class="tabBtn"
+        [class.tabBtnActive]="tab() === 'groups'"
+        (click)="setTab('groups')"
+      >
+        Grupos
+      </button>
+    </div>
+
+    @if (tab() === 'repos') {
+      <div class="headerRow">
+        <h1 class="title">Repositorios indexados</h1>
+        <button class="newBtn" (click)="handleNewRepo()">
+          + indexar nuevo repo
+        </button>
+      </div>
+
+      @if (repoService.browseLoading()) {
+        <p class="hint">Cargando repositorios…</p>
+      }
+
+      @if (repoService.browseError(); as err) {
+        <div class="errorBox">
+          {{ err }}
+          <button class="inlineRetry" (click)="reloadPage()">reintentar</button>
+        </div>
+      }
+
+      @if (!repoService.browseLoading() && !repoService.browseError() && repoService.repositories().length === 0) {
+        <div class="emptyState">
+          <p class="hint">
+            Todavía no has indexado ningún repositorio. Conecta uno de GitLab para generar
+            su wiki por primera vez.
+          </p>
+          <button class="submitBtn" (click)="handleNewRepo()">
+            Indexar mi primer repositorio →
+          </button>
+        </div>
+      }
+
+      @if (!repoService.browseLoading() && repoService.repositories().length > 0) {
+        <ul class="list">
+          @for (repo of repoService.repositories(); track repo.id) {
+            <li class="listItem" (click)="handleOpen(repo)">
+              <div class="itemMain">
+                <div class="itemName">{{ repo.name }}</div>
+                <div class="itemPath">{{ repo.project_path }}</div>
+              </div>
+              <div class="itemMeta">
+                <span class="branchTag">{{ repo.default_branch }}</span>
+                <span
+                  class="ragTag"
+                  [style.color]="repo.indexed_in_qdrant ? 'var(--accent-sage)' : 'var(--text-tertiary)'"
+                >
+                  ● {{ repo.indexed_in_qdrant ? 'RAG activo' : 'solo wiki' }}
+                </span>
+                <button
+                  class="reindexBtn"
+                  (click)="handleReindex($event, repo)"
+                  title="Comprobar si hay cambios y reindexar si es necesario"
+                >
+                  reindexar
+                </button>
+                <button
+                  class="deleteBtn"
+                  (click)="handleDelete($event, repo.id)"
+                  [disabled]="deletingId() === repo.id"
+                  title="Eliminar este repositorio indexado"
+                >
+                  {{ deletingId() === repo.id ? '…' : 'eliminar' }}
+                </button>
+              </div>
+            </li>
+          }
+        </ul>
+        @if (repoService.hasMoreRepos()) {
+          <button
+            class="loadMoreBtn"
+            (click)="loadMore()"
+            [disabled]="repoService.repoLoadingMore()"
+          >
+            {{ repoService.repoLoadingMore() ? 'Cargando…' : 'Ver más repositorios' }}
+          </button>
+        }
+      }
+    }
+
+    @if (tab() === 'groups') {
+      <div class="headerRow">
+        <h1 class="title">Grupos indexados</h1>
+        <button class="newBtn" (click)="handleNewGroup()">
+          + indexar grupo
+        </button>
+      </div>
+      <app-group-browser />
+    }
+  </div>
+</div>

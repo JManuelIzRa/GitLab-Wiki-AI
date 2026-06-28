@@ -17,6 +17,7 @@ dist/
 dist-ssr/
 frontend/.env
 .vite/
+frontend/.angular/
 
 # --- Package-manager logs ---
 logs/

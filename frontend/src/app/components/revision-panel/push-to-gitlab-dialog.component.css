@@ -1,0 +1,122 @@
+:host {
+  display: block;
+}
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.dialog-panel {
+  width: 380px;
+  max-width: 420px;
+  max-height: 100vh;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border-subtle);
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.dialog-title {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  padding: 4px;
+}
+
+.info-text {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: var(--font-serif);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.token-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.success-text {
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.error-box {
+  font-size: 12px;
+  color: var(--accent-red);
+  font-family: var(--font-mono);
+  background: rgba(192, 89, 74, 0.1);
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.save-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--accent-on-rust);
+  background: var(--accent-rust);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cancel-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.status-content {
+  padding: 16px 0;
+}

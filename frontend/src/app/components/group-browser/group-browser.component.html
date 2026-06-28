@@ -1,0 +1,49 @@
+@if (groupService.groupsLoading()) {
+  <p class="hint">Cargando grupos&hellip;</p>
+}
+
+@if (groupService.groupsError(); as err) {
+  <div class="errorBox">{{ err }}</div>
+}
+
+@if (!groupService.groupsLoading() && !groupService.groupsError() && groupService.groups().length === 0) {
+  <div class="emptyState">
+    <p class="hint">
+      Todav&iacute;a no has indexado ning&uacute;n grupo. Indexa un grupo de GitLab para generar un wiki
+      unificado con b&uacute;squeda cross-repo.
+    </p>
+    <button class="submitBtn" (click)="handleNewGroup()">
+      Indexar mi primer grupo &rarr;
+    </button>
+  </div>
+}
+
+@if (!groupService.groupsLoading() && groupService.groups().length > 0) {
+  <ul class="list">
+    @for (group of groupService.groups(); track group.id) {
+      <li class="listItem" (click)="handleOpenGroup(group)">
+        <div class="itemMain">
+          <div class="itemName">{{ group.name || group.group_path }}</div>
+          <div class="itemPath">{{ group.group_path }} &middot; {{ group.gitlab_url }}</div>
+        </div>
+        <div class="itemMeta">
+          <button
+            class="reindexBtn"
+            (click)="handleReindex($event, group)"
+            title="Reindexar este grupo"
+          >
+            reindexar
+          </button>
+          <button
+            class="deleteBtn"
+            (click)="handleDelete($event, group.id)"
+            [disabled]="deletingId() === group.id"
+            title="Eliminar este grupo indexado"
+          >
+            {{ deletingId() === group.id ? '…' : 'eliminar' }}
+          </button>
+        </div>
+      </li>
+    }
+  </ul>
+}

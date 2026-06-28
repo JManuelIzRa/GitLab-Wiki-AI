@@ -1,0 +1,96 @@
+<div class="wrapper">
+  <div class="card">
+    <button class="backLink" (click)="goBack()">
+      ← volver
+    </button>
+    <div class="eyebrow">
+      <span class="dot"></span>
+      DeepWiki · GitLab / {{ isReindex ? 'reindexar grupo' : 'nuevo grupo' }}
+    </div>
+
+    <h1 class="title">{{ isReindex ? 'Reindexar grupo' : 'Indexar grupo de GitLab' }}</h1>
+    <p class="subtitle">
+      @if (isReindex) {
+        Vuelve a descubrir y reindexar todos los repositorios del grupo. Los repos sin cambios se omiten.
+      } @else {
+        Conecta un grupo de GitLab para generar un wiki unificado con búsqueda semántica y chat cross-repo.
+      }
+    </p>
+
+    <form [formGroup]="form" (ngSubmit)="handleSubmit($event)" class="form">
+      <label class="fieldLabel">
+        <span class="fieldLabelText">URL de la instancia GitLab</span>
+        <span class="fieldHint">ej. https://gitlab.tuempresa.com</span>
+        <input
+          type="text"
+          formControlName="gitlabUrl"
+          placeholder="https://gitlab.com"
+          class="input"
+          [class.inputLocked]="isReindex"
+          required
+        />
+      </label>
+
+      <label class="fieldLabel">
+        <span class="fieldLabelText">Ruta del grupo</span>
+        <span class="fieldHint">ej. mi-empresa/equipo-backend (sin la URL base)</span>
+        <input
+          type="text"
+          formControlName="groupPath"
+          placeholder="mi-empresa/mi-equipo"
+          class="input"
+          [class.inputLocked]="isReindex"
+          required
+        />
+      </label>
+
+      <label class="fieldLabel">
+        <span class="fieldLabelText">Personal Access Token</span>
+        <span class="fieldHint">scopes: read_api, read_repository</span>
+        <div class="tokenRow">
+          <input
+            [type]="showToken() ? 'text' : 'password'"
+            formControlName="privateToken"
+            placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+            class="input"
+            required
+          />
+          <button
+            type="button"
+            class="toggleBtn"
+            (click)="toggleShowToken()"
+            [attr.aria-label]="showToken() ? 'Ocultar token' : 'Mostrar token'"
+          >
+            {{ showToken() ? 'ocultar' : 'ver' }}
+          </button>
+        </div>
+      </label>
+
+      <label class="checkboxLabel">
+        <input
+          type="checkbox"
+          formControlName="includeSubgroups"
+        />
+        <span class="checkboxText">Incluir subgrupos</span>
+      </label>
+
+      @if (groupService.groupSubmitError(); as err) {
+        <div class="errorBox">{{ err }}</div>
+      }
+
+      <button type="submit" class="submitBtn" [disabled]="groupService.isGroupSubmitting()">
+        @if (groupService.isGroupSubmitting()) {
+          Iniciando...
+        } @else if (isReindex) {
+          Reindexar grupo →
+        } @else {
+          Indexar grupo →
+        }
+      </button>
+    </form>
+
+    <p class="footnote">
+      El token nunca se almacena: se usa para descubrir proyectos y luego para indexar cada repo.
+    </p>
+  </div>
+</div>

@@ -1,0 +1,23 @@
+@if (open) {
+  <div class="modal-overlay" (click)="onOverlayClick()">
+    <div #trapEl class="command-palette" role="dialog" aria-modal="true" aria-label="Comandos" (click)="onModalClick($event)">
+      <input
+        #filterInput
+        [value]="query()"
+        (input)="query.set($any($event.target).value)"
+        placeholder="Buscar páginas y acciones…"
+      />
+      <div class="command-results">
+        @for (entry of entries(); track entry.id) {
+          <button (click)="onEntryClick(entry)">
+            <span>{{ entry.label }}</span>
+            <small>{{ entry.hint }}</small>
+          </button>
+        }
+        @if (entries().length === 0) {
+          <p>Sin resultados</p>
+        }
+      </div>
+    </div>
+  </div>
+}

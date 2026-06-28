@@ -1,0 +1,238 @@
+.wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: radial-gradient(circle at 20% 0%, rgba(201,124,74,0.08), transparent 45%), var(--bg-base);
+}
+
+.card {
+  width: 100%;
+  max-width: 560px;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 24px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-rust);
+  display: inline-block;
+}
+
+.tabBar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0;
+}
+
+.tabBtn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.tabBtnActive {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-bottom: 2px solid var(--accent-rust);
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.title {
+  font-family: var(--font-serif);
+  font-size: 30px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.newBtn {
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 9px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-rust);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.hint {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.submitBtn {
+  background: var(--accent-rust);
+  border: none;
+  border-radius: 6px;
+  padding: 13px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-on-rust);
+  cursor: pointer;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.listItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.itemMain {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.itemName {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemPath {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.branchTag {
+  font-size: 10.5px;
+  background: var(--bg-elevated-2);
+  color: var(--text-secondary);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.ragTag {
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.reindexBtn {
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.deleteBtn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.deleteBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.errorBox {
+  background: rgba(192,89,74,0.12);
+  border: 1px solid var(--accent-red);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-error);
+  line-height: 1.5;
+}
+
+.loadMoreBtn {
+  margin-top: 12px;
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 9px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.loadMoreBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.inlineRetry {
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--bg-elevated-2);
+  color: var(--text-secondary);
+  padding: 6px 9px;
+  margin-left: 8px;
+  cursor: pointer;
+}
