@@ -41,8 +41,7 @@ def _get_embed_model(model_name: str, device: str, cache_folder: str):
             from llama_index.embeddings.huggingface import HuggingFaceEmbedding
         except ImportError as e:
             raise EmbeddingError(
-                "Falta instalar llama-index-embeddings-huggingface (y sentence-transformers). "
-                f"Detalle: {e}"
+                f"Falta instalar llama-index-embeddings-huggingface (y sentence-transformers). Detalle: {e}"
             ) from e
         try:
             _embed_model_cache[cache_key] = HuggingFaceEmbedding(
@@ -56,8 +55,7 @@ def _get_embed_model(model_name: str, device: str, cache_folder: str):
 
 
 class EmbeddingClient:
-    def __init__(self, model_name: str | None = None, device: str | None = None,
-                 cache_folder: str | None = None):
+    def __init__(self, model_name: str | None = None, device: str | None = None, cache_folder: str | None = None):
         # self.model_name = model_name or settings.embedding_model_name
         # self.device = device or settings.embedding_device
         self.cache_folder = cache_folder or settings.embedding_cache_folder
