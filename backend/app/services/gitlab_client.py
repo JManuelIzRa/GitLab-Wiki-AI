@@ -5,13 +5,18 @@ Usamos httpx directamente contra la API REST v4 en lugar de python-gitlab
 para tener control fino sobre paginación, timeouts y manejo de errores,
 y para que el resto del código no dependa de una librería externa pesada.
 """
+
 from __future__ import annotations
 
+import asyncio
 import base64
+import logging
 from dataclasses import dataclass
 from urllib.parse import quote
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class GitLabAuthError(Exception):
@@ -20,6 +25,10 @@ class GitLabAuthError(Exception):
 
 class GitLabNotFoundError(Exception):
     """El proyecto, branch o archivo no existe."""
+
+
+class GitLabRateLimitError(Exception):
+    """GitLab rate limit exceeded after all retries."""
 
 
 @dataclass
@@ -42,23 +51,55 @@ class GitLabClient:
     """
     Cliente mínimo y robusto para la API v4 de GitLab.
     Soporta cualquier instancia self-hosted: solo cambia `base_url`.
+
+    Reutiliza un único AsyncClient para todas las peticiones, lo que evita
+    el overhead de TCP+TLS por llamada. Usar como context manager (async with)
+    o llamar a close() cuando se termina de usar.
     """
 
-    def __init__(self, base_url: str, private_token: str, timeout: float = 30.0):
+    def __init__(self, base_url: str, private_token: str, timeout: float = 30.0, max_retries: int = 4):
         self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}/api/v4"
-        self.headers = {"PRIVATE-TOKEN": private_token}
-        self.timeout = timeout
+        self._max_retries = max_retries
+        self._http = httpx.AsyncClient(
+            headers={"PRIVATE-TOKEN": private_token},
+            timeout=timeout,
+        )
+
+    async def close(self) -> None:
+        await self._http.aclose()
+
+    async def __aenter__(self) -> "GitLabClient":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.close()
 
     async def _get(self, url: str, params: dict | None = None) -> httpx.Response:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(url, headers=self.headers, params=params)
-        if resp.status_code == 401:
-            raise GitLabAuthError("Token inválido, expirado o sin permisos suficientes (scope read_api/read_repository).")
-        if resp.status_code == 404:
-            raise GitLabNotFoundError(f"Recurso no encontrado en GitLab: {url}")
-        resp.raise_for_status()
-        return resp
+        for attempt in range(self._max_retries + 1):
+            resp = await self._http.get(url, params=params)
+            if resp.status_code == 429:
+                if attempt < self._max_retries:
+                    wait = int(resp.headers.get("Retry-After", 2**attempt))
+                    logger.warning(
+                        "GitLab rate limit on %s; retrying in %ds (attempt %d/%d)",
+                        url,
+                        wait,
+                        attempt + 1,
+                        self._max_retries,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise GitLabRateLimitError(f"GitLab rate limit exceeded after {self._max_retries} retries for {url}")
+            if resp.status_code == 401:
+                raise GitLabAuthError(
+                    "Token inválido, expirado o sin permisos suficientes (scope read_api/read_repository)."
+                )
+            if resp.status_code == 404:
+                raise GitLabNotFoundError(f"Recurso no encontrado en GitLab: {url}")
+            resp.raise_for_status()
+            return resp
+        raise GitLabRateLimitError(f"GitLab rate limit exceeded after {self._max_retries} retries for {url}")
 
     async def get_project(self, project_path: str) -> GitLabProject:
         """project_path puede ser 'grupo/subgrupo/proyecto' (se URL-encodea)."""
@@ -72,8 +113,8 @@ class GitLabClient:
                 f"{self.api_url}/projects/{data['id']}/repository/branches/{quote(data['default_branch'], safe='')}"
             )
             last_commit_sha = branch_resp.json().get("commit", {}).get("id", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("No se pudo obtener el SHA del último commit para '%s': %s", project_path, e)
 
         return GitLabProject(
             id=str(data["id"]),
@@ -92,36 +133,28 @@ class GitLabClient:
         files: list[GitLabFile] = []
         page = 1
         per_page = 100
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            while True:
-                resp = await client.get(
-                    f"{self.api_url}/projects/{project_id}/repository/tree",
-                    headers=self.headers,
-                    params={
-                        "recursive": "true",
-                        "ref": branch,
-                        "per_page": per_page,
-                        "page": page,
-                    },
-                )
-                if resp.status_code == 401:
-                    raise GitLabAuthError("Token inválido o sin permisos para listar el árbol del repositorio.")
-                if resp.status_code == 404:
-                    raise GitLabNotFoundError("Branch o proyecto no encontrado al listar el árbol.")
-                resp.raise_for_status()
-                items = resp.json()
-                if not items:
-                    break
-                for item in items:
-                    if item.get("type") == "blob":
-                        files.append(GitLabFile(path=item["path"], size=0))
-                if len(files) >= max_files:
-                    files = files[:max_files]
-                    break
-                next_page = resp.headers.get("x-next-page")
-                if not next_page:
-                    break
+        while True:
+            resp = await self._get(
+                f"{self.api_url}/projects/{project_id}/repository/tree",
+                params={"recursive": "true", "ref": branch, "per_page": per_page, "page": page},
+            )
+            items = resp.json()
+            if not items:
+                break
+            for item in items:
+                if item.get("type") == "blob":
+                    files.append(GitLabFile(path=item["path"], size=0))
+            if len(files) >= max_files:
+                files = files[:max_files]
+                break
+            next_page = resp.headers.get("x-next-page")
+            if not next_page:
+                break
+            try:
                 page = int(next_page)
+            except ValueError:
+                logger.warning("Malformed x-next-page header %r; stopping pagination.", next_page)
+                break
         return files
 
     async def get_file_content(self, project_id: str, file_path: str, branch: str) -> str | None:
@@ -141,3 +174,87 @@ class GitLabClient:
             return raw.decode("utf-8")
         except (UnicodeDecodeError, ValueError):
             return None  # binario o encoding no soportado
+
+    async def list_branches(self, project_id: str, max_branches: int = 50) -> list[str]:
+        """Return branch names for a project, sorted by name, up to max_branches."""
+        resp = await self._get(
+            f"{self.api_url}/projects/{project_id}/repository/branches",
+            params={"per_page": min(max_branches, 100), "order_by": "name"},
+        )
+        return [b["name"] for b in resp.json()]
+
+    async def get_branch_commit_sha(self, project_id: str, branch: str) -> str:
+        """Return the HEAD commit SHA for the exact branch being indexed."""
+        resp = await self._get(f"{self.api_url}/projects/{project_id}/repository/branches/{quote(branch, safe='')}")
+        return resp.json().get("commit", {}).get("id", "")
+
+    async def get_group(self, group_path: str) -> dict:
+        """Returns metadata for a GitLab group or subgroup."""
+        encoded = quote(group_path, safe="")
+        resp = await self._get(f"{self.api_url}/groups/{encoded}")
+        return resp.json()
+
+    async def list_group_projects(
+        self, group_path: str, include_subgroups: bool = True, max_projects: int = 500
+    ) -> list[dict]:
+        """Lists all projects in a group, with optional subgroup traversal.
+
+        Returns list of dicts with at least: id, name, path_with_namespace, default_branch.
+        """
+        encoded = quote(group_path, safe="")
+        projects: list[dict] = []
+        page = 1
+        per_page = 50
+        while len(projects) < max_projects:
+            params = {
+                "include_subgroups": str(include_subgroups).lower(),
+                "per_page": per_page,
+                "page": page,
+                "archived": "false",
+            }
+            try:
+                resp = await self._get(f"{self.api_url}/groups/{encoded}/projects", params=params)
+            except GitLabNotFoundError:
+                break
+            items = resp.json()
+            if not items:
+                break
+            projects.extend(items)
+            if len(projects) >= max_projects:
+                projects = projects[:max_projects]
+                break
+            next_page = resp.headers.get("x-next-page")
+            if not next_page:
+                break
+            try:
+                page = int(next_page)
+            except ValueError:
+                break
+        return projects
+
+    async def create_or_update_wiki_page(self, project_id: str, slug: str, title: str, content: str) -> dict:
+        """Creates or updates a page in the project's native GitLab wiki.
+
+        Tries PUT (update) first; falls back to POST (create) when the page does not exist.
+        Requires the PAT to have api or write_wiki scope.
+        """
+        encoded_slug = quote(slug, safe="")
+        wiki_url = f"{self.api_url}/projects/{project_id}/wikis/{encoded_slug}"
+        body = {"title": title, "content": content, "format": "markdown"}
+
+        try:
+            resp = await self._http.put(wiki_url, json=body)
+            if resp.status_code == 404:
+                # Page doesn't exist yet — create it
+                create_url = f"{self.api_url}/projects/{project_id}/wikis"
+                resp = await self._http.post(create_url, json=body)
+            if resp.status_code == 401:
+                raise GitLabAuthError(
+                    "Token inválido o sin permisos suficientes para escribir en el wiki (scope: api o write_wiki)."
+                )
+            resp.raise_for_status()
+            return resp.json()
+        except GitLabAuthError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Failed to push wiki page '{slug}': {exc}") from exc

@@ -1,25 +1,41 @@
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "FastAPI backend for generating searchable AI wikis from GitLab repositories"
 requires-python = ">=3.11"
 dependencies = [
-    "aiosqlite==0.20.0",
-    "anthropic==0.45.2",
-    "fastapi[standard]==0.115.6",
+    "aiosqlite==0.22.1",
+    "fastapi[standard]==0.138.1",
     "httpx==0.28.1",
-    "llama-index>=0.12.38",
-    "llama-index-core>=0.12.42",
-    "llama-index-embeddings-huggingface>=0.5.5",
-    "openai==1.59.7",
-    "pydantic==2.10.4",
-    "pydantic-settings==2.7.1",
-    "python-gitlab==5.6.0",
-    "python-multipart==0.0.20",
-    "qdrant-client==1.12.2",
-    "sqlalchemy==2.0.36",
-    "tiktoken==0.8.0",
-    "tree-sitter-language-pack>=1.10.9",
-    "uvicorn[standard]==0.34.0",
+    "llama-index-core>=0.14.23",
+    "openai==2.44.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "python-multipart==0.0.32",
+    "qdrant-client==1.18.0",
+    "sqlalchemy==2.0.51",
+    "tiktoken==0.13.0",
+    "tree-sitter>=0.25.2",
+    "tree-sitter-python>=0.25.0",
+    "tree-sitter-javascript>=0.25.0",
+    "tree-sitter-typescript>=0.23.2",
+    "tree-sitter-language-pack>=1.11.0",
+    "uvicorn[standard]==0.49.0",
+    "slowapi>=0.1.10",
+    "python-json-logger>=4.1.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.20",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

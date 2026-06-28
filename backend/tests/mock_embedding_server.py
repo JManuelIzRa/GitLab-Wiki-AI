@@ -2,8 +2,9 @@
 Mock del servicio de embeddings (formato OpenAI: {input, model} -> {data: [{embedding}]}),
 para validar EmbeddingClient sin depender de la red 192.168.0.100 del usuario.
 """
-from fastapi import FastAPI
+
 import uvicorn
+from fastapi import FastAPI
 
 app = FastAPI()
 

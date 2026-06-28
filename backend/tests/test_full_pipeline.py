@@ -12,8 +12,10 @@ para no depender de un LLM ni de un servicio de embeddings reales. Esto valida:
   Y el grafo de dependencias se calcula igual (es independiente de si Qdrant está disponible)
 - El manejo de errores de GitLab (token inválido)
 """
+
 import asyncio
 import sys
+
 sys.path.insert(0, ".")
 
 from unittest.mock import AsyncMock, patch
@@ -44,6 +46,7 @@ async def fake_embed_batch(self, texts: list[str]) -> list[list[float]]:
 
 def make_run_index_job_importable():
     from app.services.indexer import run_index_job
+
     return run_index_job
 
 
@@ -71,11 +74,13 @@ async def scenario_success_with_embedding():
     # VectorStore real apunta a 192.168.0.100:6333 (inalcanzable desde aquí), así que también
     # mockeamos reset_collection/upsert_chunks/close para que la parte de Qdrant en sí no
     # dependa de red, mientras probamos que el flujo de chunking + embedding se ejecuta bien.
-    with patch("app.services.wiki_generator.WikiGenerator._ask", new=fake_ask), \
-         patch("app.services.embedding_client.EmbeddingClient.embed_batch", new=fake_embed_batch), \
-         patch("app.services.vector_store.VectorStore.reset_collection", new=AsyncMock(return_value=None)), \
-         patch("app.services.vector_store.VectorStore.upsert_chunks", new=AsyncMock(return_value=None)), \
-         patch("app.services.vector_store.VectorStore.close", new=AsyncMock(return_value=None)):
+    with (
+        patch("app.services.wiki_generator.WikiGenerator._ask", new=fake_ask),
+        patch("app.services.embedding_client.EmbeddingClient.embed_batch", new=fake_embed_batch),
+        patch("app.services.vector_store.VectorStore.reset_collection", new=AsyncMock(return_value=None)),
+        patch("app.services.vector_store.VectorStore.upsert_chunks", new=AsyncMock(return_value=None)),
+        patch("app.services.vector_store.VectorStore.close", new=AsyncMock(return_value=None)),
+    ):
         await run_index_job(
             job_id=job_id,
             gitlab_url="http://127.0.0.1:9000",
@@ -86,22 +91,19 @@ async def scenario_success_with_embedding():
 
     async with AsyncSessionLocal() as session:
         job = await session.get(IndexJob, job_id)
-        print("JOB STATUS:", job.status, "PROGRESS:", job.progress, "STEP:", job.current_step)
         assert job.status == JobStatus.DONE.value
         assert job.progress == 100
 
         repo = await session.get(Repository, repo_id)
-        print("REPO:", repo.name, repo.project_id, repo.default_branch, repo.last_commit_sha,
-              "indexed_in_qdrant:", repo.indexed_in_qdrant)
         assert repo.project_id == "42"
         assert repo.last_commit_sha == "abc1234567890"
         assert repo.indexed_in_qdrant is True, "con el embedding mockeado exitosamente, debe marcarse True"
 
-        pages = (await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order))).scalars().all()
-        print("\nPÁGINAS GENERADAS:")
-        for p in pages:
-            print(f"  - [{p.order}] {p.slug} :: {p.title} (fuentes: {p.source_files})")
-            print(f"      contenido: {p.content_markdown[:80]}...")
+        pages = (
+            (await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id).order_by(WikiPage.order)))
+            .scalars()
+            .all()
+        )
 
         slugs = {p.slug for p in pages}
         assert "overview" in slugs
@@ -109,17 +111,15 @@ async def scenario_success_with_embedding():
         assert "setup" in slugs
         assert any(s.startswith("module-") for s in slugs)
 
-        print("\nGRAFO DE DEPENDENCIAS:", repo.dependency_graph)
         assert repo.dependency_graph, "el grafo de dependencias debe haberse calculado durante el indexado"
         assert "nodes" in repo.dependency_graph and "edges" in repo.dependency_graph
         # El mock GitLab tiene index.js -> api/users.js -> utils/userStore.js, así que
         # el grafo real (calculado con regex sobre el código real leído de GitLab) debe
         # detectar al menos una dependencia entre los módulos resultantes.
         assert len(repo.dependency_graph["nodes"]) > 0, "debe haber detectado al menos un módulo"
-        assert len(repo.dependency_graph["edges"]) > 0, \
+        assert len(repo.dependency_graph["edges"]) > 0, (
             "debe haber detectado al menos una dependencia real (index.js importa api/users.js)"
-
-    print("\n✅ PIPELINE COMPLETO (wiki + embedding mockeado exitoso) FUNCIONA CORRECTAMENTE")
+        )
 
 
 async def scenario_embedding_fails_gracefully():
@@ -163,19 +163,16 @@ async def scenario_embedding_fails_gracefully():
     async with AsyncSessionLocal() as session:
         job = await session.get(IndexJob, job_id)
         repo = await session.get(Repository, repo_id)
-        print("\nJOB CON QDRANT/EMBEDDINGS INALCANZABLES -> status:", job.status,
-              "| indexed_in_qdrant:", repo.indexed_in_qdrant)
         assert job.status == JobStatus.DONE.value, "el wiki debe completarse aunque el embedding falle"
         assert repo.indexed_in_qdrant is False
 
         pages = (await session.execute(select(WikiPage).where(WikiPage.repository_id == repo_id))).scalars().all()
         assert len(pages) == 4, "las páginas del wiki deben persistir aunque el embedding falle"
 
-        assert repo.dependency_graph, \
+        assert repo.dependency_graph, (
             "el grafo de dependencias debe calcularse igual aunque Qdrant/embeddings fallen (es un paso independiente)"
+        )
         assert len(repo.dependency_graph.get("edges", [])) > 0
-
-    print("✅ FALLO DE QDRANT/EMBEDDINGS NO TIRA EL JOB; EL WIKI SIGUE DISPONIBLE")
 
 
 async def scenario_invalid_gitlab_token():
@@ -183,7 +180,9 @@ async def scenario_invalid_gitlab_token():
     run_index_job = make_run_index_job_importable()
 
     async with AsyncSessionLocal() as session:
-        repo2 = Repository(gitlab_url="http://127.0.0.1:9000", project_path="demo-group/demo-project", project_id="", name="x")
+        repo2 = Repository(
+            gitlab_url="http://127.0.0.1:9000", project_path="demo-group/demo-project", project_id="", name="x"
+        )
         session.add(repo2)
         await session.commit()
         await session.refresh(repo2)
@@ -197,11 +196,8 @@ async def scenario_invalid_gitlab_token():
 
     async with AsyncSessionLocal() as session:
         job2 = await session.get(IndexJob, job2_id)
-        print("\nJOB CON TOKEN INVÁLIDO -> status:", job2.status, "| error:", job2.error_message)
         assert job2.status == JobStatus.FAILED.value
         assert "Token inválido" in job2.error_message or "401" in job2.error_message
-
-    print("✅ MANEJO DE ERROR DE AUTENTICACIÓN DE GITLAB FUNCIONA CORRECTAMENTE")
 
 
 async def main():

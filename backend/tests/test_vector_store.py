@@ -1,16 +1,15 @@
-"""
-Valida VectorStore + code_chunker usando Qdrant en modo in-memory (qdrant-client soporta
-location=":memory:" sin necesitar un servidor real). Esto prueba la lógica real contra un
-Qdrant de verdad, sin depender de Docker ni de la red 192.168.0.100 del usuario.
-"""
-import asyncio
+"""Tests for VectorStore + code_chunker using Qdrant in-memory mode (no server needed)."""
+
 import sys
+
 sys.path.insert(0, ".")
+
+import pytest
 
 from app.services.code_chunker import chunk_files
 from app.services.vector_store import VectorStore
 
-SAMPLE_FILES = {
+_SAMPLE_FILES = {
     "src/api/users.js": (
         "const express = require('express');\n"
         "const router = express.Router();\n"
@@ -40,68 +39,74 @@ SAMPLE_FILES = {
     ),
 }
 
-# Embeddings falsos de dimensión pequeña (no necesitamos un modelo real para probar
-# la mecánica de chunking + upsert + búsqueda de VectorStore).
-FAKE_DIM = 8
+_FAKE_DIM = 8
+_KEYWORDS = ["user", "router", "find", "create", "map", "export", "require", "id"]
 
 
-def fake_embed(text: str) -> list[float]:
-    """Embedding determinístico y barato: cuenta ocurrencias de palabras clave."""
-    keywords = ["user", "router", "find", "create", "map", "export", "require", "id"]
+def _fake_embed(text: str) -> list[float]:
     text_lower = text.lower()
-    return [float(text_lower.count(k)) for k in keywords]
+    return [float(text_lower.count(k)) for k in _KEYWORDS]
 
 
-async def main():
-    chunks = chunk_files(SAMPLE_FILES)
-    print(f"Chunks generados: {len(chunks)}")
-    for c in chunks:
-        print(f"  - {c.chunk_id} (líneas {c.start_line}-{c.end_line}, {len(c.content)} chars)")
-    assert len(chunks) == 2  # ambos archivos son cortos, un chunk cada uno
-
-    # Monkeypatch: forzamos VectorStore a usar Qdrant in-memory en vez de host/port reales.
+async def _make_store(repo_id: int = 999):
     from qdrant_client import AsyncQdrantClient
     from qdrant_client.models import Distance, VectorParams
 
-    store = VectorStore(repository_id=999)
+    store = VectorStore(repository_id=repo_id)
     store._client = AsyncQdrantClient(location=":memory:")
-
-    # Recreamos la colección con la dimensión de prueba (no la de settings, que es 1536)
     await store._client.create_collection(
         collection_name=store.collection_name,
-        vectors_config=VectorParams(size=FAKE_DIM, distance=Distance.COSINE),
+        vectors_config=VectorParams(size=_FAKE_DIM, distance=Distance.COSINE),
     )
+    return store
 
-    embeddings = [fake_embed(c.content) for c in chunks]
+
+@pytest.mark.asyncio
+async def test_chunking_produces_expected_count():
+    chunks = chunk_files(_SAMPLE_FILES)
+    # Both files are short enough to fit in a single chunk each
+    assert len(chunks) == 2
+
+
+@pytest.mark.asyncio
+async def test_upsert_and_search():
+    chunks = chunk_files(_SAMPLE_FILES)
+    store = await _make_store()
+
+    embeddings = [_fake_embed(c.content) for c in chunks]
     await store.upsert_chunks(chunks, embeddings)
-    print("\nUpsert OK")
 
-    # Búsqueda: pregunta sobre "crear un usuario" debería acercarse más al chunk de userStore.js
-    query_vec = fake_embed("how do I create a user with an id")
+    query_vec = _fake_embed("how do I create a user with an id")
     results = await store.search(query_vec, top_k=2)
-    print(f"\nResultados de búsqueda ({len(results)}):")
-    for r in results:
-        print(f"  - {r.file_path} (score={r.score:.3f}) líneas {r.start_line}-{r.end_line}")
 
     assert len(results) == 2
-    assert results[0].score >= results[1].score  # ordenados por relevancia descendente
-
-    # Re-upsert del mismo chunk (mismo chunk_id) debe sobreescribir, no duplicar.
-    await store.upsert_chunks(chunks, embeddings)
-    results_after_reupsert = await store.search(query_vec, top_k=10)
-    assert len(results_after_reupsert) == 2, "el re-upsert no debería duplicar puntos"
-    print("\nRe-upsert no duplica puntos: OK")
-
-    # Colección inexistente -> search debe devolver [] en vez de lanzar excepción
-    other_store = VectorStore(repository_id=12345)
-    other_store._client = store._client  # mismo cliente in-memory, pero colección distinta sin crear
-    empty_results = await other_store.search(query_vec)
-    assert empty_results == []
-    print("Búsqueda en colección inexistente devuelve [] sin lanzar excepción: OK")
+    assert results[0].score >= results[1].score
 
     await store.close()
-    print("\n✅ VectorStore + code_chunker funcionan correctamente end-to-end (Qdrant in-memory)")
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+@pytest.mark.asyncio
+async def test_reupsert_does_not_duplicate():
+    chunks = chunk_files(_SAMPLE_FILES)
+    store = await _make_store()
+    embeddings = [_fake_embed(c.content) for c in chunks]
+
+    await store.upsert_chunks(chunks, embeddings)
+    await store.upsert_chunks(chunks, embeddings)  # second upsert of same chunk_ids
+
+    query_vec = _fake_embed("user")
+    results = await store.search(query_vec, top_k=10)
+    assert len(results) == 2, "re-upsert must not duplicate points"
+
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_search_missing_collection_returns_empty():
+    from qdrant_client import AsyncQdrantClient
+
+    store = VectorStore(repository_id=12345)
+    store._client = AsyncQdrantClient(location=":memory:")
+    # Collection for repo 12345 was never created
+    results = await store.search(_fake_embed("user"))
+    assert results == []
