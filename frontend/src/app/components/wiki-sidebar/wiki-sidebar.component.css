@@ -17,6 +17,15 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  opacity: 0.7;
+}
+
 .top-row {
   display: flex;
   justify-content: space-between;

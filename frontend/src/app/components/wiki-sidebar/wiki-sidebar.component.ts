@@ -14,6 +14,7 @@ import {
 import { ApiService, WikiTextSearchResult } from '../../services/api.service';
 import { RepoService } from '../../services/repo.service';
 import { RepoSettingsPanelComponent } from '../repo-settings-panel/repo-settings-panel.component';
+import { AtlasBrandComponent } from '../atlas-brand/atlas-brand.component';
 import { Subject, Subscription, debounceTime, distinctUntilChanged, switchMap } from 'rxjs';
 
 interface PageNav {
@@ -31,7 +32,7 @@ function groupPages(pages: PageNav[]) {
 @Component({
   selector: 'app-wiki-sidebar',
   standalone: true,
-  imports: [RepoSettingsPanelComponent],
+  imports: [RepoSettingsPanelComponent, AtlasBrandComponent],
   templateUrl: './wiki-sidebar.component.html',
   styleUrls: ['./wiki-sidebar.component.css'],
 })
