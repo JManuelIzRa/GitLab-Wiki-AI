@@ -3,6 +3,7 @@ import { Router } from '@angular/router';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { RepoService } from '../../services/repo.service';
 import { ApiService } from '../../services/api.service';
+import { AtlasBrandComponent } from '../atlas-brand/atlas-brand.component';
 
 function validateGitLabUrl(url: string): string | null {
   if (!url.trim()) return 'La URL es obligatoria';
@@ -18,7 +19,7 @@ function validateProjectPath(path: string): string | null {
 
 @Component({
   selector: 'app-connect-form',
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, AtlasBrandComponent],
   templateUrl: './connect-form.component.html',
   styleUrls: ['./connect-form.component.css'],
   standalone: true,

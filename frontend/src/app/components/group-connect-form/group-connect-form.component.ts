@@ -2,10 +2,11 @@ import { Component, OnInit, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { GroupService } from '../../services/group.service';
+import { AtlasBrandComponent } from '../atlas-brand/atlas-brand.component';
 
 @Component({
   selector: 'app-group-connect-form',
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, AtlasBrandComponent],
   templateUrl: './group-connect-form.component.html',
   styleUrls: ['./group-connect-form.component.css'],
   standalone: true,
