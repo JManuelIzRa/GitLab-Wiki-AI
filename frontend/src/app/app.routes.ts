@@ -65,5 +65,12 @@ export const routes: Routes = [
         (m) => m.GroupWikiViewComponent,
       ),
   },
+  {
+    path: 'getting-started',
+    loadComponent: () =>
+      import('./components/getting-started/getting-started.component').then(
+        (m) => m.GettingStartedComponent,
+      ),
+  },
   { path: '**', redirectTo: '/browse' },
 ];

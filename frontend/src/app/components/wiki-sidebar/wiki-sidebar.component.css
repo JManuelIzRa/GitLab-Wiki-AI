@@ -316,6 +316,20 @@
   color: var(--accent-rust);
 }
 
+.help-link {
+  display: block;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-decoration: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+.help-link:hover {
+  color: var(--accent-rust);
+}
+
 /* ---- Tree navigation ---- */
 .tree-row {
   display: flex;

@@ -363,7 +363,7 @@ async def check_repository_staleness(
         raise HTTPException(status_code=404, detail="Repositorio no encontrado")
     token = payload.private_token or repo.gitlab_token or settings.gitlab_default_token
     if not token:
-            raise HTTPException(status_code=400, detail="Se requiere un token de GitLab para comprobar la frescura.")
+        raise HTTPException(status_code=400, detail="Se requiere un token de GitLab para comprobar la frescura.")
     try:
         async with GitLabClient(repo.gitlab_url, token) as client:
             project = await client.get_project(repo.project_path)
@@ -730,7 +730,9 @@ async def push_to_gitlab_wiki(
                 )
                 pushed += 1
             except GitLabAuthError as e:
-                raise HTTPException(status_code=403, detail=f"Error de autenticación al publicar en el wiki de GitLab: {e}")
+                raise HTTPException(
+                    status_code=403, detail=f"Error de autenticación al publicar en el wiki de GitLab: {e}"
+                )
             except Exception as e:
                 logger.warning("Failed to push page '%s' to GitLab wiki: %s", page.slug, e)
                 errors.append(f"{page.slug}: {e}")

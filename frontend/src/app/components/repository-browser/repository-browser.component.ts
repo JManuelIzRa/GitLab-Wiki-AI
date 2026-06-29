@@ -41,6 +41,17 @@ export class RepositoryBrowserComponent implements OnInit {
   ngOnInit(): void {
     this.repoService.loadRepositories();
     this.groupService.loadGroups();
+
+    // First-launch auto-redirect to getting-started guide
+    const dismissed = localStorage.getItem('atlas_onboarding_dismissed') === 'true';
+    if (!dismissed) {
+      // Check after repos load
+      setTimeout(() => {
+        if (this.repoService.repositories().length === 0) {
+          this.router.navigate(['/getting-started']);
+        }
+      }, 100);
+    }
   }
 
   handleOpen(repo: RepositorySummary): void {

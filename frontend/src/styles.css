@@ -29,6 +29,15 @@
   --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
 
   color-scheme: dark;
+
+  /* Onboarding checklist */
+  --step-done: var(--accent-sage);
+  --step-active: var(--accent-rust);
+  --step-pending: #4A4438;
+  --step-locked: #2A2620;
+  --progress-bg: #2A2620;
+  --progress-fill: var(--accent-rust);
+  --help-sidebar-bg: var(--bg-elevated);
 }
 
 /* Light theme */
@@ -57,6 +66,15 @@
   --code-bg: #1E1E1E;
 
   color-scheme: light;
+
+  /* Onboarding checklist */
+  --step-done: #4A7A5A;
+  --step-active: var(--accent-rust);
+  --step-pending: #A89C88;
+  --step-locked: #C8BCA8;
+  --progress-bg: #E2DAC8;
+  --progress-fill: var(--accent-rust);
+  --help-sidebar-bg: var(--bg-elevated);
 }
 
 * {

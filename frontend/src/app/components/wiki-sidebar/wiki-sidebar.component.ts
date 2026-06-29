@@ -11,6 +11,7 @@ import {
   ElementRef,
   ViewChild,
 } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { ApiService, WikiTextSearchResult } from '../../services/api.service';
 import { RepoService } from '../../services/repo.service';
 import { ThemeService } from '../../services/theme.service';
@@ -68,7 +69,7 @@ function filterTree(nodes: FlatTreeNode[], q: string): FlatTreeNode[] {
 @Component({
   selector: 'app-wiki-sidebar',
   standalone: true,
-  imports: [RepoSettingsPanelComponent, AtlasBrandComponent],
+  imports: [RouterLink, RepoSettingsPanelComponent, AtlasBrandComponent],
   templateUrl: './wiki-sidebar.component.html',
   styleUrls: ['./wiki-sidebar.component.css'],
 })
