@@ -1,0 +1,25 @@
+<span class="brand-wrapper" [style.fontSize.px]="size * 0.56">
+  <svg
+    [attr.width]="size"
+    [attr.height]="size"
+    [attr.viewBox]="'0 0 24 24'"
+    fill="none"
+    class="brand-svg"
+  >
+    <!-- Outer ring -->
+    <circle cx="12" cy="12" r="10" stroke="var(--accent-rust)" stroke-width="1.5" fill="none" opacity="0.9"/>
+    <!-- Latitude arc -->
+    <path d="M3 12 Q12 8 21 12" stroke="var(--accent-sage)" stroke-width="1" fill="none" opacity="0.6"/>
+    <!-- Longitude arcs -->
+    <path d="M12 3 Q8 12 12 21" stroke="var(--accent-sage)" stroke-width="1" fill="none" opacity="0.6"/>
+    <path d="M12 3 Q16 12 12 21" stroke="var(--accent-sage)" stroke-width="1" fill="none" opacity="0.4"/>
+    <!-- Center compass dot -->
+    <circle cx="12" cy="12" r="1.5" fill="var(--accent-rust)"/>
+    <!-- North indicator -->
+    <path d="M12 3 L11 7 M12 3 L13 7" stroke="var(--accent-rust)" stroke-width="1" fill="none" opacity="0.5"/>
+  </svg>
+
+  @if (showText) {
+    <span class="brand-text">Atlas</span>
+  }
+</span>
