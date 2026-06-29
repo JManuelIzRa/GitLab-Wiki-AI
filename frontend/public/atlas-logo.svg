@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <!-- Outer ring -->
+  <circle cx="12" cy="12" r="10" stroke="#C97C4A" stroke-width="1.5" fill="none" opacity="0.9"/>
+  <!-- Latitude arc (horizontal) -->
+  <path d="M3 12 Q12 8 21 12" stroke="#7A9A85" stroke-width="1" fill="none" opacity="0.6"/>
+  <!-- Longitude arc (vertical) -->
+  <path d="M12 3 Q8 12 12 21" stroke="#7A9A85" stroke-width="1" fill="none" opacity="0.6"/>
+  <!-- Second longitude -->
+  <path d="M12 3 Q16 12 12 21" stroke="#7A9A85" stroke-width="1" fill="none" opacity="0.4"/>
+  <!-- Compass dot at center -->
+  <circle cx="12" cy="12" r="1.5" fill="#C97C4A"/>
+  <!-- Subtle compass north indicator -->
+  <path d="M12 3 L11 7 M12 3 L13 7" stroke="#C97C4A" stroke-width="1" fill="none" opacity="0.5"/>
+</svg>
