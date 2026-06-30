@@ -1,0 +1,19 @@
+.brand-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.brand-svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.brand-text {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}

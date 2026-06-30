@@ -1,0 +1,146 @@
+<aside
+  class="wiki-sidebar"
+  [class.is-open]="mobileOpen"
+>
+  <div class="repo-header">
+    <div class="sidebar-brand">
+      <app-atlas-brand [size]="14" />
+    </div>
+    <div class="top-row">
+      <button class="back-btn" (click)="onReset()" title="Ver todos los repositorios indexados">
+        ← mis repos
+      </button>
+      <div class="top-actions">
+        <button class="mobile-close-button" (click)="onClose()" aria-label="Cerrar navegación">✕</button>
+        <button class="theme-btn" (click)="themeService.toggleTheme()" title="Alternar tema claro/oscuro">
+          {{ themeService.theme() === 'dark' ? '☀︎' : '☾' }}
+        </button>
+        <button class="theme-btn" (click)="showSettings.set(true)" title="Configuración del repositorio (prompt, token webhook)">
+          ⚙
+        </button>
+      </div>
+    </div>
+
+    @if (repository(); as repo) {
+      <div class="repo-name">{{ repo['name'] }}</div>
+      <div class="repo-path">{{ repo['project_path'] }}</div>
+      <div class="repo-meta">
+        <span class="branch-tag">{{ repo['default_branch'] }}</span>
+        <span class="sha-tag">{{ repo['last_commit_sha'].slice(0, 8) }}</span>
+      </div>
+      <div
+        class="rag-tag"
+        [class.rag-active]="repo['indexed_in_qdrant']"
+        [class.rag-inactive]="!repo['indexed_in_qdrant']"
+        [title]="repo['indexed_in_qdrant']
+          ? 'El código está indexado en Qdrant: las preguntas buscan en el código real'
+          : 'El código no se pudo indexar en Qdrant: las preguntas usan solo el wiki generado'"
+      >
+        <span class="rag-dot">●</span>
+        {{ repo['indexed_in_qdrant'] ? 'búsqueda semántica activa' : 'búsqueda semántica no disponible' }}
+      </div>
+
+      @if (lastIndexed(); as indexed) {
+        <div class="indexed-row">
+          <span class="indexed-at">indexado {{ indexed }}</span>
+          <button class="reindex-btn" (click)="onReindex()" title="Volver a indexar este repositorio">
+            ↺ reindexar
+          </button>
+        </div>
+      }
+
+      <button class="action-btn" (click)="repoService.setSearchOpen(true)">⌕ buscar en el código</button>
+      <button class="action-btn" (click)="repoService.setGraphOpen(true)">⊞ grafo de dependencias</button>
+      <button class="action-btn" (click)="repoService.setHistoryOpen(true)">◷ historial y frescura</button>
+      <div class="export-row">
+        <a [href]="exportUrl()" download class="export-btn" title="Descargar como Markdown">↓ .md</a>
+        <a [href]="htmlExportUrl()" download class="export-btn" title="Descargar como HTML">↓ .html</a>
+        <button class="export-btn" title="Imprimir la página actual / guardar como PDF" (click)="printPage()">⎙ pdf</button>
+      </div>
+    }
+  </div>
+
+  <div class="search-wrap">
+    <input
+      #searchInput
+      type="search"
+      placeholder="buscar… (tecla /)"
+      [value]="filter()"
+      (input)="onFilterChange($any($event.target).value)"
+      aria-label="Buscar en el wiki"
+    />
+    @if (displayedLoading()) {
+      <div class="search-spinner">…</div>
+    }
+  </div>
+
+  <nav class="nav">
+    @if (pages().length === 0 && repository()) {
+      <div class="sidebar-skeleton">
+        <div class="sk-line" style="width: 75%"></div>
+        <div class="sk-line" style="width: 55%"></div>
+        <div class="sk-line" style="width: 85%"></div>
+        <div class="sk-line" style="width: 60%"></div>
+        <div class="sk-line" style="width: 40%"></div>
+      </div>
+    } @else {
+      @if (displayedResults(); as results) {
+      @if (results.length > 0) {
+        <div class="nav-section">
+          <div class="nav-section-label">resultados en el wiki</div>
+          <div class="nav-group">
+            @for (r of results; track r.slug) {
+              <button
+                class="nav-item nav-search-item"
+                [class.active]="r.slug === activeSlug()"
+                (click)="onSelectPage(r.slug)"
+              >
+                <div class="search-title">{{ r.title }}</div>
+                <div class="search-excerpt">{{ r.excerpt }}</div>
+              </button>
+            }
+          </div>
+        </div>
+      } @else if (filter().trim().length >= 2) {
+        <div class="no-results">sin resultados para "{{ filter() }}"</div>
+      }
+    } @else {
+      @if (filteredTree().length === 0) {
+        <div class="no-results">sin resultados</div>
+      }
+
+      @for (node of filteredTree(); track node.slug) {
+        <div class="tree-row" [style.paddingLeft.px]="12 + node.depth * 16">
+          @if (node.hasChildren) {
+            <button
+              class="tree-chevron"
+              (click)="toggleCollapse(node.slug)"
+              [attr.aria-label]="node.collapsed ? 'Expandir' : 'Colapsar'"
+            >
+              {{ node.collapsed ? '▶' : '▼' }}
+            </button>
+          } @else {
+            <span class="tree-chevron tree-chevron-empty"></span>
+          }
+          <button
+            class="tree-item"
+            [class.active]="node.slug === activeSlug()"
+            (click)="onSelectPage(node.slug)"
+          >
+            {{ node.title }}
+          </button>
+        </div>
+      }
+    }
+    }
+  </nav>
+
+  <div class="key-hint">
+    <span>/</span> buscar · <span>Alt+← / Alt+→</span> navegar · <span>?</span> atajos
+  </div>
+  <a class="help-link" routerLink="/getting-started">¿Cómo empezar?</a>
+</aside>
+
+@if (showSettings()) {
+  <app-repo-settings-panel (close)="showSettings.set(false)" />
+}

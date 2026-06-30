@@ -1,0 +1,70 @@
+<div class="overlay" (click)="onOverlayClick()">
+  <div #trapEl class="modal" role="dialog" aria-modal="true" aria-label="Buscar en el código" (click)="onModalClick($event)">
+    <div class="header">
+      <span class="title">buscar en el código</span>
+      <button class="close-btn" (click)="close.emit()">✕</button>
+    </div>
+
+    @if (!ragAvailable) {
+      <div class="unavailable">
+        La búsqueda semántica no está disponible para este repositorio (el código no
+        se pudo indexar en Qdrant). Puedes seguir usando el chat sobre el wiki.
+      </div>
+    } @else {
+      <form class="search-row" (submit)="handleSearch($event)">
+        <input
+          #searchInput
+          [value]="query()"
+          (input)="query.set($any($event.target).value)"
+          placeholder="ej. dónde se valida el token de autenticación"
+          class="input"
+        />
+        <button type="submit" class="search-btn" [disabled]="loading()">
+          {{ loading() ? 'buscando…' : 'buscar' }}
+        </button>
+      </form>
+
+      @if (error()) {
+        <div class="error-box">{{ error() }}</div>
+      }
+
+      <div class="results-area">
+        @if (results() === null && !error()) {
+          <p class="hint">
+            Busca por significado, no solo por texto exacto — ej. "manejo de errores de
+            red" encontrará código relevante aunque no contenga esas palabras literalmente.
+          </p>
+        }
+        @if (results()?.length === 0) {
+          <p class="hint">Sin resultados relevantes.</p>
+        }
+        @for (r of results(); track r.file_path; let i = $index) {
+          <div class="result-card">
+            <button class="result-header" (click)="toggleExpand(i)">
+              <span class="result-chevron">{{ expanded().has(i) ? '▾' : '▸' }}</span>
+              <span class="result-path">{{ r.file_path }}</span>
+              <span class="result-lines">L{{ r.start_line }}-{{ r.end_line }}</span>
+              @if (matchingLineNumbers(r.content, query(), r.start_line).size; as count) {
+                <span class="match-count">{{ count }} coincidencia{{ count !== 1 ? 's' : '' }}</span>
+              }
+              <span class="result-score">{{ (r.score * 100).toFixed(0) }}%</span>
+            </button>
+            @if (expanded().has(i)) {
+              <app-highlighted-code
+                [language]="languageFromPath(r.file_path)"
+                [showLineNumbers]="true"
+                [startingLineNumber]="r.start_line"
+                [wrapLines]="true"
+                [lineProps]="linePropsFn(r.content, query(), r.start_line)"
+                [customStyle]="{ margin: '0', fontSize: '12px', borderTop: '1px solid var(--border-subtle)', borderRadius: '0' }"
+              >{{ r.content }}</app-highlighted-code>
+            }
+            @if (gitLabSourceUrl(r.file_path, r.start_line, r.end_line); as url) {
+              <a [href]="url" target="_blank" rel="noreferrer" class="source-link">abrir en GitLab ↗</a>
+            }
+          </div>
+        }
+      </div>
+    }
+  </div>
+</div>

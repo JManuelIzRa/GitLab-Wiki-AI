@@ -1,0 +1,146 @@
+@if (group(); as g) {
+  <div class="gvw-wrapper">
+    <!-- Sidebar -->
+    <aside class="gvw-sidebar">
+      <button class="gvw-back-btn" (click)="handleReset()">← mis repos</button>
+
+      <div class="gvw-group-meta">
+        <div class="gvw-group-icon">
+          {{ (g.name || g.group_path).charAt(0).toUpperCase() }}
+        </div>
+        <div>
+          <div class="gvw-group-name">{{ g.name || g.group_path }}</div>
+          <div class="gvw-group-path">{{ g.group_path }}</div>
+        </div>
+      </div>
+
+      <div class="gvw-group-info">
+        {{ g.repositories.length || 0 }} repositorios
+      </div>
+
+      <nav class="gvw-tabs">
+        @for (tab of ['overview', 'repos', 'search', 'chat']; track tab) {
+          <button
+            class="gvw-tab"
+            [class.gvw-tab-active]="activeTab() === tab"
+            (click)="setActiveTab(tab)"
+          >
+            @if (tab === 'overview') { Visión general }
+            @else if (tab === 'repos') { Repositorios }
+            @else if (tab === 'search') { Buscar }
+            @else { Chat }
+          </button>
+        }
+      </nav>
+    </aside>
+
+    <!-- Main panel -->
+    <main class="gvw-main">
+      <!-- Overview tab -->
+      @if (activeTab() === 'overview') {
+        <article class="gvw-article">
+          <h1 class="gvw-h1">{{ g.name || g.group_path }}</h1>
+          <div class="gvw-markdown">
+            @if (g.overview_markdown) {
+              <div class="gvw-markdown-body" [innerHTML]="markdownToHtml(g.overview_markdown)"></div>
+            } @else {
+              <p><em>No hay contenido generado todavía.</em></p>
+            }
+          </div>
+        </article>
+      }
+
+      <!-- Repos tab -->
+      @if (activeTab() === 'repos') {
+        <div class="gvw-repo-list">
+          @for (repo of g.repositories; track repo.id) {
+            <div class="gvw-repo-card" (click)="handleOpenRepo(repo)">
+              <div class="gvw-repo-name">{{ repo.name }}</div>
+              <div class="gvw-repo-path">{{ repo.project_path }}</div>
+            </div>
+          }
+        </div>
+      }
+
+      <!-- Search tab -->
+      @if (activeTab() === 'search') {
+        <div class="gvw-search-panel">
+          <form class="gvw-search-row" (ngSubmit)="handleSearch()">
+            <input
+              class="gvw-search-input"
+              [value]="searchQuery()"
+              (input)="searchQuery.set($any($event.target).value)"
+              placeholder="Buscar en todos los repos del grupo…"
+            />
+            <button
+              class="gvw-search-btn"
+              type="submit"
+              [disabled]="isSearching()"
+            >
+              {{ isSearching() ? 'buscando…' : 'buscar' }}
+            </button>
+          </form>
+
+          @if (searchResults(); as results) {
+            @if (results.length === 0) {
+              <p class="gvw-hint">Sin resultados.</p>
+            }
+            @for (r of results; track $index) {
+              <div class="gvw-result-card">
+                <div class="gvw-result-header">{{ r.file_path }}</div>
+                <p class="gvw-result-excerpt">{{ r.content.slice(0, 200) }}</p>
+              </div>
+            }
+          }
+        </div>
+      }
+
+      <!-- Chat tab -->
+      @if (activeTab() === 'chat') {
+        <div class="gvw-chat-panel">
+          <div class="gvw-chat-messages">
+            @for (m of chatHistory(); track $index) {
+              <div
+                class="gvw-chat-bubble"
+                [class.gvw-chat-user]="m.role === 'user'"
+                [class.gvw-chat-assistant]="m.role === 'assistant'"
+                [class.gvw-chat-error]="m.role === 'error'"
+              >
+                @if (m.role === 'assistant' || m.role === 'user') {
+                  <div class="gvw-chat-content">{{ m.content }}</div>
+                } @else {
+                  <div class="gvw-chat-content gvw-chat-content-error">{{ m.content }}</div>
+                }
+                @if (m.sources && m.sources.length > 0) {
+                  <div class="gvw-chat-sources">
+                    @for (s of m.sources; track $index) {
+                      <span class="gvw-source-chip">{{ s }}</span>
+                    }
+                  </div>
+                }
+              </div>
+            }
+            <div #chatEnd></div>
+          </div>
+
+          <form class="gvw-chat-input-row" (ngSubmit)="handleChat()">
+            <input
+              class="gvw-chat-input"
+              [value]="chatInput()"
+              (input)="chatInput.set($any($event.target).value)"
+              placeholder="Pregunta sobre el grupo…"
+              [disabled]="isChatStreaming()"
+            />
+            <button
+              class="gvw-chat-send-btn"
+              type="submit"
+              [disabled]="isChatStreaming() || !chatInput().trim()"
+            >
+              enviar
+            </button>
+          </form>
+        </div>
+      }
+    </main>
+  </div>
+}

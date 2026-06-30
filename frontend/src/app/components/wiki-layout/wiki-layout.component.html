@@ -1,0 +1,99 @@
+@if (repository()) {
+  <div class="wiki-layout">
+    <!-- Mobile menu button -->
+    <button
+      class="mobile-menu-button"
+      (click)="mobileNavOpen.set(true)"
+      aria-label="Abrir navegación"
+    >
+      ☰
+    </button>
+
+    <!-- Mobile nav backdrop -->
+    @if (mobileNavOpen()) {
+      <button
+        class="mobile-nav-backdrop"
+        (click)="mobileNavOpen.set(false)"
+        aria-label="Cerrar navegación"
+      ></button>
+    }
+
+    <app-wiki-sidebar
+      [mobileOpen]="mobileNavOpen()"
+      (mobileClose)="mobileNavOpen.set(false)"
+      (reset)="handleReset()"
+      (reindex)="handleReindex()"
+    />
+
+    <!-- Main content area -->
+    <main class="wiki-main">
+      <!-- Breadcrumb navigation -->
+      <nav class="breadcrumbs" aria-label="Navegación">
+        @for (crumb of breadcrumbs(); track $index; let last = $last) {
+          @if (!last) {
+            @if (crumb.slug; as slug) {
+              <a class="crumb-link" (click)="onPageClick(slug)">{{ crumb.label }}</a>
+            } @else {
+              <span class="crumb-static">{{ crumb.label }}</span>
+            }
+            <span class="crumb-sep">›</span>
+          } @else {
+            <span class="crumb-current">{{ crumb.label }}</span>
+          }
+        }
+      </nav>
+      <!-- Skeleton: loading and no page yet -->
+      @if (pageLoading() && !activePage()) {
+        <div class="page-skeleton">
+          <div class="sk-block" style="width: 55%; height: 36px; margin-bottom: 28px"></div>
+          <div class="sk-block" style="width: 100%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 92%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 80%; height: 14px; margin-bottom: 32px"></div>
+          <div class="sk-block" style="width: 35%; height: 22px; margin-bottom: 18px"></div>
+          <div class="sk-block" style="width: 100%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 88%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 100%; height: 96px; margin-bottom: 32px"></div>
+          <div class="sk-block" style="width: 40%; height: 22px; margin-bottom: 18px"></div>
+          <div class="sk-block" style="width: 100%; height: 14px; margin-bottom: 10px"></div>
+          <div class="sk-block" style="width: 76%; height: 14px"></div>
+        </div>
+      }
+
+      <!-- Loading bar when page already exists but is refreshing -->
+      @if (pageLoading() && activePage()) {
+        <div class="loading-bar">
+          <div class="loading-bar-inner"></div>
+        </div>
+      }
+
+      <app-wiki-page-content />
+    </main>
+
+    <app-ask-panel />
+
+    <!-- Modal overlays -->
+    @if (searchOpen()) {
+      <app-code-search (close)="repoService.setSearchOpen(false)" />
+    }
+
+    @if (graphOpen()) {
+      <app-dependency-graph-view (close)="repoService.setGraphOpen(false)" />
+    }
+
+    @if (shortcutsOpen()) {
+      <app-keyboard-shortcuts-modal (close)="repoService.setShortcutsOpen(false)" />
+    }
+
+    @if (historyOpen()) {
+      <app-job-history-panel (close)="repoService.setHistoryOpen(false)" />
+    }
+
+    @if (paletteOpen()) {
+      <app-command-palette
+        [open]="paletteOpen()"
+        [actions]="paletteActions"
+        (close)="repoService.setPaletteOpen(false)"
+      />
+    }
+  </div>
+}

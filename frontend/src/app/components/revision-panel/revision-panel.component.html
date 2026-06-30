@@ -1,0 +1,67 @@
+@if (diffRev(); as diff) {
+  <div class="diff-overlay">
+    <div class="diff-panel">
+      <div class="revision-header">
+        <span class="revision-title">
+          Diferencias ·
+          <span class="diff-added">+{{ computeDiff(currentContent, diff.content_preview).added }}</span>
+          <span class="diff-deleted">-{{ computeDiff(currentContent, diff.content_preview).deleted }}</span>
+        </span>
+        <button class="close-btn" (click)="closeDiff()">✕</button>
+      </div>
+      <div class="diff-body">
+        @for (op of computeDiff(currentContent, diff.content_preview).ops; track $index) {
+          <div class="diff-line" [class.diff-add]="op.type === 'add'" [class.diff-del]="op.type === 'del'">
+            <span class="diff-symbol">{{ op.type === 'add' ? '+' : op.type === 'del' ? '−' : ' ' }}</span>
+            <span class="diff-text">{{ op.line || ' ' }}</span>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+} @else {
+  <div class="revision-overlay">
+    <div class="revision-panel">
+      <div class="revision-header">
+        <span class="revision-title">Historial de revisiones</span>
+        <button class="close-btn" (click)="close.emit()">✕</button>
+      </div>
+
+      @if (loading()) {
+        <div class="revision-info">Cargando…</div>
+      }
+      @if (error()) {
+        <div class="revision-error">{{ error() }}</div>
+      }
+      @if (!loading() && revisions().length === 0) {
+        <div class="revision-info">No hay revisiones guardadas todavía.</div>
+      }
+
+      <div class="revision-list">
+        @for (rev of revisions(); track rev.id) {
+          <div class="revision-item">
+            <div class="revision-meta">
+              <span class="revision-date">{{ rev.created_at | date: 'short' }}</span>
+              @if (rev.is_ai_generated) {
+                <span class="ai-badge">IA</span>
+              }
+            </div>
+            <p class="revision-preview">{{ rev.content_preview }}…</p>
+            <div class="revision-actions">
+              <button class="diff-btn" (click)="showDiff(rev)" title="Ver diferencias con la versión actual">
+                diff
+              </button>
+              <button
+                class="restore-btn"
+                [disabled]="restoring() === rev.id"
+                (click)="handleRestore(rev)"
+              >
+                ↻ {{ restoring() === rev.id ? 'Restaurando…' : 'Restaurar' }}
+              </button>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+}

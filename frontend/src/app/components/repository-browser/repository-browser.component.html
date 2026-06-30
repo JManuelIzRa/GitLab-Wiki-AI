@@ -1,0 +1,133 @@
+<main class="wrapper">
+  <section class="card" aria-labelledby="dashboard-title">
+    <div class="eyebrow"><app-atlas-brand [size]="18" /></div>
+
+    <div class="hero">
+      <div>
+        <h1 id="dashboard-title" class="title">Tu base de conocimiento</h1>
+        <p class="subtitle">Explora documentación viva generada desde tus repositorios de GitLab.</p>
+      </div>
+      <button class="newBtn" (click)="handleNewRepo()">+ indexar repositorio</button>
+    </div>
+
+    <div class="tabBar" role="tablist" aria-label="Tipo de contenido">
+      <button
+        class="tabBtn"
+        role="tab"
+        [attr.aria-selected]="tab() === 'repos'"
+        [class.tabBtnActive]="tab() === 'repos'"
+        (click)="setTab('repos')"
+      >
+        Repositorios <span class="tabCount">{{ repoService.repositories().length }}</span>
+      </button>
+      <button
+        class="tabBtn"
+        role="tab"
+        [attr.aria-selected]="tab() === 'groups'"
+        [class.tabBtnActive]="tab() === 'groups'"
+        (click)="setTab('groups')"
+      >
+        Grupos <span class="tabCount">{{ groupService.groups().length }}</span>
+      </button>
+    </div>
+
+    @if (tab() === 'repos') {
+      @if (repoService.repositories().length > 0) {
+        <div class="summary" aria-label="Resumen de repositorios">
+          <div><strong>{{ repoService.repositories().length }}</strong><span>indexados</span></div>
+          <div><strong>{{ semanticRepositoryCount() }}</strong><span>con búsqueda semántica</span></div>
+        </div>
+      }
+
+      @if (repoService.repositories().length > 0) {
+        <label class="searchBox">
+          <span class="srOnly">Filtrar repositorios</span>
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            placeholder="Buscar por nombre, ruta o branch…"
+            [value]="searchQuery()"
+            (input)="searchQuery.set($any($event.target).value)"
+          />
+        </label>
+      }
+
+      @if (repoService.browseLoading()) {
+        <div class="skeletonList" aria-live="polite" aria-label="Cargando repositorios">
+          <div class="skeletonCard"></div>
+          <div class="skeletonCard"></div>
+          <div class="skeletonCard"></div>
+        </div>
+      }
+
+      @if (repoService.browseError(); as err) {
+        <div class="errorBox" role="alert">
+          <div><strong>No pudimos conectar con el servidor.</strong><span>{{ err }}</span></div>
+          <button class="inlineRetry" (click)="retryRepositories()">Reintentar</button>
+        </div>
+      }
+
+      @if (!repoService.browseLoading() && !repoService.browseError() && repoService.repositories().length === 0) {
+        <div class="emptyState">
+          <div class="empty-brand-mark"><app-atlas-brand [size]="40" [showText]="false" /></div>
+          <h2>Empieza por un repositorio</h2>
+          <p>Conecta GitLab para generar un wiki navegable, buscar en el código y conversar con el proyecto.</p>
+          <button class="submitBtn" (click)="handleNewRepo()">Indexar mi primer repositorio →</button>
+        </div>
+      }
+
+      @if (!repoService.browseLoading() && repoService.repositories().length > 0) {
+        @if (filteredRepositories().length > 0) {
+          <ul class="list">
+            @for (repo of filteredRepositories(); track repo.id) {
+              <li class="listItem">
+                <button class="repoOpen" (click)="handleOpen(repo)" [attr.aria-label]="'Abrir wiki de ' + repo.name">
+                  <span class="repoGlyph" aria-hidden="true">{{ repo.name.slice(0, 1).toUpperCase() }}</span>
+                  <span class="itemMain">
+                    <span class="itemName">{{ repo.name }}</span>
+                    <span class="itemPath">{{ repo.project_path }}</span>
+                    @if (repo.description) { <span class="itemDescription">{{ repo.description }}</span> }
+                  </span>
+                  <span class="itemStatus">
+                    <span class="branchTag">{{ repo.default_branch }}</span>
+                    <span class="updatedAt">actualizado {{ formatUpdatedAt(repo.updated_at) }}</span>
+                  </span>
+                </button>
+                <div class="itemActions">
+                  <span class="ragTag" [class.ragActive]="repo.indexed_in_qdrant">
+                    <span aria-hidden="true">●</span> {{ repo.indexed_in_qdrant ? 'RAG activo' : 'solo wiki' }}
+                  </span>
+                  <button class="reindexBtn" (click)="handleReindex($event, repo)">reindexar</button>
+                  <button
+                    class="deleteBtn"
+                    (click)="handleDelete($event, repo.id)"
+                    [disabled]="deletingId() === repo.id"
+                    [attr.aria-label]="'Eliminar ' + repo.name"
+                  >
+                    {{ deletingId() === repo.id ? '…' : 'eliminar' }}
+                  </button>
+                </div>
+              </li>
+            }
+          </ul>
+        } @else {
+          <div class="noResults">Sin resultados para “{{ searchQuery() }}”.</div>
+        }
+
+        @if (repoService.hasMoreRepos() && !searchQuery()) {
+          <button class="loadMoreBtn" (click)="loadMore()" [disabled]="repoService.repoLoadingMore()">
+            {{ repoService.repoLoadingMore() ? 'Cargando…' : 'Ver más repositorios' }}
+          </button>
+        }
+      }
+    }
+
+    @if (tab() === 'groups') {
+      <div class="sectionHeader">
+        <div><h2>Wikis de grupo</h2><p>Consulta arquitectura y dependencias entre repositorios.</p></div>
+        <button class="newBtn" (click)="handleNewGroup()">+ indexar grupo</button>
+      </div>
+      <app-group-browser />
+    }
+  </section>
+</main>

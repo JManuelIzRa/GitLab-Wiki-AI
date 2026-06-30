@@ -1,0 +1,156 @@
+:host {
+  display: block;
+}
+
+.wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: radial-gradient(
+      circle at 20% 0%,
+      rgba(201, 124, 74, 0.08),
+      transparent 45%
+    ),
+    var(--bg-base);
+}
+
+.card {
+  width: 100%;
+  max-width: 560px;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 24px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-rust);
+  display: inline-block;
+}
+
+.title {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text-primary);
+}
+
+.step {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 20px;
+}
+
+.hint {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+
+.bar-track {
+  height: 6px;
+  background: var(--bg-elevated-2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  background: var(--accent-rust);
+}
+
+.fill-failed {
+  background: var(--accent-red);
+}
+
+.pct {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  margin: 0 0 20px;
+}
+
+.error-box {
+  background: rgba(192, 89, 74, 0.12);
+  border: 1px solid var(--accent-red);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-error);
+  margin-bottom: 16px;
+}
+
+.error-pre {
+  margin: 6px 0 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.repo-list {
+  margin-top: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 0;
+}
+
+.repo-list-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  padding: 0 12px 6px;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.repo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.repo-path {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-label {
+  font-size: 10.5px;
+  flex-shrink: 0;
+}
+
+.error-msg {
+  font-size: 11px;
+  color: var(--accent-red);
+  font-weight: 700;
+  cursor: help;
+}

@@ -21,7 +21,7 @@ uv run pytest tests/ -x -q
 
 cd ../frontend
 npm run lint
-npm test -- --run
+npm test -- --watch=false
 npm run build
 ```
 

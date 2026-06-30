@@ -68,7 +68,7 @@ jobs:
         run: npm run lint
 
       - name: Unit tests
-        run: npm test -- --run
+        run: npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox
 
       - name: Build
         run: npm run build

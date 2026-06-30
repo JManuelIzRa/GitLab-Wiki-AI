@@ -1,0 +1,134 @@
+.hint {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.submitBtn {
+  background: var(--accent-rust);
+  border: none;
+  border-radius: 6px;
+  padding: 13px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-on-rust);
+  cursor: pointer;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.listItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0 16px 0 0;
+}
+
+.groupOpen {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.itemMain {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.itemName {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemPath {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.reindexBtn {
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.deleteBtn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.deleteBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.errorBox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(192,89,74,0.12);
+  border: 1px solid var(--accent-red);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-error);
+  line-height: 1.5;
+}
+
+.retryBtn {
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 6px 9px;
+}
+
+@media (max-width: 620px) {
+  .listItem { grid-template-columns: 1fr; padding: 0; }
+  .itemMeta { justify-content: flex-end; padding: 0 12px 12px; }
+}

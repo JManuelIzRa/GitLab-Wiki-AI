@@ -1,0 +1,143 @@
+:host {
+  display: block;
+}
+
+.history-panel {
+  width: min(680px, 100%);
+  max-height: 82vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
+  padding: 18px;
+}
+
+.history-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.history-panel header div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-panel header small {
+  color: var(--text-tertiary);
+}
+
+.history-panel header button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.freshness-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 0;
+  font-size: 12px;
+}
+
+.freshness-row a {
+  color: var(--accent-rust);
+  text-decoration: none;
+}
+
+.freshness-row button {
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--bg-elevated-2);
+  color: var(--text-secondary);
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.freshness-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+
+.freshness-badge.current {
+  background: rgba(122, 154, 133, 0.18);
+  color: var(--accent-sage);
+}
+
+.freshness-badge.stale {
+  background: rgba(201, 124, 74, 0.18);
+  color: var(--accent-rust);
+}
+
+.inline-error {
+  margin: 10px 0;
+  color: var(--accent-red);
+  font-size: 12px;
+}
+
+.job-list {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-list li {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+}
+
+.job-list li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.job-list strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-list em {
+  color: var(--accent-red);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.job-list small {
+  color: var(--text-tertiary);
+}
+
+.job-status {
+  align-self: start;
+  text-align: center;
+  border-radius: 999px;
+  padding: 3px 6px;
+  font-size: 10px;
+  background: var(--bg-elevated-2);
+}
+
+.job-status.done {
+  color: var(--accent-sage);
+}
+
+.job-status.failed {
+  color: var(--accent-red);
+}

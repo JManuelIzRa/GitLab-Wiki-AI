@@ -1,0 +1,341 @@
+<div class="main-content">
+  <div class="page">
+    <!-- Page header -->
+    <div class="page-header">
+      <h1>Primeros pasos en Atlas</h1>
+      <p class="subtitle">
+        Atlas convierte tus repositorios de GitLab en wikis navegables con búsqueda semántica,
+        análisis de código y conversación asistida por IA. Sigue estos pasos para empezar.
+      </p>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="progress-section">
+      <div class="progress-label">{{ completedCount() }}/5 completado</div>
+      <div class="progress-bar">
+        <div
+          class="progress-fill"
+          [style.width.%]="progressPercent()"
+        ></div>
+      </div>
+    </div>
+
+    <!-- Checklist -->
+    <div class="checklist">
+      @for (s of steps(); track s.id) {
+        <!-- Step card -->
+        <div
+          class="step-card"
+          [class.locked]="s.locked"
+          [class.completed]="s.status === 'done'"
+          [class.active]="s.status === 'in_progress' && !s.locked"
+          [class.expanded]="expandedStep() === s.id"
+          (click)="toggleStep(s.id)"
+          role="button"
+          tabindex="0"
+          [attr.aria-expanded]="expandedStep() === s.id"
+        >
+          <!-- Icon -->
+          @if (s.status === 'done') {
+            <div class="step-icon icon-done" (click)="handleToggleCheck(s.id, $event)">&#10003;</div>
+          } @else if (s.locked) {
+            <div class="step-icon icon-locked">&#128274;</div>
+          } @else if (s.status === 'in_progress') {
+            <div class="step-icon icon-active">&#9673;</div>
+          } @else {
+            <div class="step-icon icon-pending" (click)="handleToggleCheck(s.id, $event)">&#9675;</div>
+          }
+
+          <!-- Info -->
+          <div class="step-info">
+            <div class="step-number">Paso {{ s.id }}</div>
+            <div class="step-title">{{ s.title }}</div>
+            <div class="step-desc">{{ s.description }}</div>
+          </div>
+
+          <!-- Status badge -->
+          @if (s.status === 'done') {
+            <div class="step-status-badge badge-done">Completado</div>
+          } @else if (s.status === 'in_progress') {
+            <div class="step-status-badge badge-active">En progreso</div>
+          } @else if (s.locked) {
+            <div class="step-status-badge badge-pending">Bloqueado</div>
+          } @else {
+            <div class="step-status-badge badge-pending">Pendiente</div>
+          }
+
+          <!-- CTA button -->
+          @if (s.status !== 'done' && !s.locked) {
+            <button class="step-cta" (click)="handleCta(s.id); $event.stopPropagation()">
+              @if (s.id === 1) {
+                Conectar repositorio
+              } @else if (s.id === 2) {
+                Ver estado
+              } @else if (s.id === 3 || s.id === 4) {
+                Abrir wiki
+              } @else {
+                Explorar
+              }
+            </button>
+          }
+
+          <!-- Expand caret -->
+          <div
+            class="step-expand"
+            [class.rotated]="expandedStep() === s.id"
+          >&#9660;</div>
+        </div>
+
+        <!-- Detail panel -->
+        @if (expandedStep() === s.id) {
+          <div class="detail-panel">
+            @if (s.id === 1) {
+              <div class="detail-content">
+                <p>Para conectar un repositorio necesitas tres cosas:</p>
+                <ul>
+                  <li>
+                    <strong>URL de GitLab</strong> — la dirección de tu instancia
+                    (ej. https://gitlab.com)
+                  </li>
+                  <li>
+                    <strong>Ruta del proyecto</strong> — grupo/subgrupo/proyecto (sin la URL)
+                  </li>
+                  <li>
+                    <strong>Personal Access Token (PAT)</strong> — un token con alcances
+                    <code>read_api</code> y <code>read_repository</code>
+                  </li>
+                </ul>
+                <details>
+                  <summary>Cómo crear un PAT en GitLab</summary>
+                  <ol>
+                    <li>
+                      Ve a <strong>Configuración &#8594; Tokens de acceso</strong> en tu perfil
+                      de GitLab
+                    </li>
+                    <li>
+                      Crea un token con alcances <code>read_api</code> y
+                      <code>read_repository</code>
+                    </li>
+                    <li>Copia el token (solo se muestra una vez)</li>
+                    <li>
+                      Pégalo en el campo &laquo;Personal Access Token&raquo; del formulario
+                    </li>
+                  </ol>
+                </details>
+              </div>
+            }
+
+            @if (s.id === 2) {
+              <div class="detail-content">
+                <p>
+                  Una vez conectado, el backend procesa tu repositorio en varias etapas.
+                  Todo el proceso suele tomar entre <strong>30 segundos y 2 minutos</strong>
+                  para proyectos pequeños o medianos.
+                </p>
+                <div class="pipeline-stages">
+                  <div class="pipeline-stage">
+                    <span class="stage-dot"></span>
+                    <div>
+                      <strong>Pendiente</strong>
+                      <span>El trabajo está en cola</span>
+                    </div>
+                  </div>
+                  <div class="pipeline-stage">
+                    <span class="stage-dot"></span>
+                    <div>
+                      <strong>Clonando</strong>
+                      <span>Obteniendo el árbol de archivos desde GitLab</span>
+                    </div>
+                  </div>
+                  <div class="pipeline-stage">
+                    <span class="stage-dot"></span>
+                    <div>
+                      <strong>Analizando</strong>
+                      <span>Detección de lenguaje, dependencias y módulos</span>
+                    </div>
+                  </div>
+                  <div class="pipeline-stage">
+                    <span class="stage-dot"></span>
+                    <div>
+                      <strong>Generando</strong>
+                      <span>IA escribe las páginas del wiki con diagramas</span>
+                    </div>
+                  </div>
+                  <div class="pipeline-stage">
+                    <span class="stage-dot"></span>
+                    <div>
+                      <strong>Embedding</strong>
+                      <span>Indexación semántica para búsqueda y chat</span>
+                    </div>
+                  </div>
+                  <div class="pipeline-stage">
+                    <span class="stage-dot stage-dot--done"></span>
+                    <div>
+                      <strong>Completado</strong>
+                      <span>Wiki navegable lista para explorar</span>
+                    </div>
+                  </div>
+                </div>
+                <p style="margin-top: 12px">
+                  Puedes monitorear el progreso en tiempo real desde la página de indexación.
+                </p>
+              </div>
+            }
+
+            @if (s.id === 3) {
+              <div class="detail-content">
+                <p>
+                  El wiki se organiza con una <strong>barra lateral</strong> que lista todas
+                  las páginas generadas. Puedes navegar entre ellas de varias formas:
+                </p>
+                <table class="shortcut-table">
+                  <tr>
+                    <td><kbd>/</kbd></td>
+                    <td>Buscar páginas en el sidebar</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>?</kbd></td>
+                    <td>Mostrar todos los atajos de teclado</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>Alt+&#8592;</kbd> / <kbd>Alt+&#8594;</kbd></td>
+                    <td>Página anterior / siguiente</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>Cmd+K</kbd></td>
+                    <td>Abrir paleta de comandos</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>T</kbd></td>
+                    <td>Alternar tema claro/oscuro</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>Esc</kbd></td>
+                    <td>Cerrar panel o modal activo</td>
+                  </tr>
+                </table>
+                <p>
+                  Cada página tiene acciones disponibles: <strong>editar</strong> el contenido
+                  Markdown, <strong>regenerar</strong> con IA, y
+                  <strong>exportar</strong> la página.
+                </p>
+              </div>
+            }
+
+            @if (s.id === 4) {
+              <div class="detail-content">
+                <p>
+                  El <strong>panel de preguntas</strong> (RAG) te permite conversar sobre el
+                  código del repositorio. Está disponible desde el botón flotante
+                  <strong>+</strong> en la esquina inferior derecha del wiki.
+                </p>
+                <p>
+                  El sistema combina dos fuentes de contexto para responder:
+                </p>
+                <ul>
+                  <li>
+                    <strong>Contexto del wiki</strong> — las páginas generadas con la
+                    documentación del proyecto
+                  </li>
+                  <li>
+                    <strong>Contexto del código fuente</strong> — fragmentos relevantes del
+                    repositorio indexados semánticamente
+                  </li>
+                </ul>
+                <p>Preguntas de ejemplo:</p>
+                <ul>
+                  <li>&laquo;¿Cuál es la arquitectura general del proyecto?&raquo;</li>
+                  <li>&laquo;Explica el flujo de autenticación paso a paso&raquo;</li>
+                  <li>&laquo;¿Qué dependencias externas usa el módulo principal?&raquo;</li>
+                  <li>&laquo;¿Cómo se manejan los errores en las API routes?&raquo;</li>
+                </ul>
+              </div>
+            }
+
+            @if (s.id === 5) {
+              <div class="detail-content">
+                <p>
+                  Atlas tiene muchas funciones más allá de la lectura de wikis.
+                  Estas son algunas de las más útiles:
+                </p>
+                <ul>
+                  <li>
+                    <strong>Búsqueda de código (&#8981;)</strong> — busca fragmentos específicos
+                    en el código fuente del repositorio
+                  </li>
+                  <li>
+                    <strong>Grafo de dependencias (&#8862;)</strong> — visualiza las relaciones
+                    entre módulos y paquetes
+                  </li>
+                  <li>
+                    <strong>Historial (&#9679;)</strong> — consulta el estado y las
+                    ejecuciones anteriores de indexación
+                  </li>
+                  <li>
+                    <strong>Configuración (&#9881;)</strong> — ajusta preferencias de idioma,
+                    tema y caché
+                  </li>
+                  <li>
+                    <strong>Paleta de comandos (<kbd>Cmd+K</kbd>)</strong> — acceso rápido a
+                    todas las acciones desde el teclado
+                  </li>
+                  <li>
+                    <strong>Chat multi-repositorio en grupos</strong> — conversación cruzada
+                    entre repositorios de un grupo indexado
+                  </li>
+                  <li>
+                    <strong>Exportación</strong> — descarga páginas individuales en formato
+                    <code>.md</code>, <code>.html</code> o <code>.pdf</code>
+                  </li>
+                </ul>
+              </div>
+            }
+          </div>
+        }
+      }
+    </div>
+
+    <!-- Completion banner -->
+    @if (isAllDone()) {
+      <div class="completion-banner">
+        <span>&iexcl;Todo completado! &#127881;</span>
+        <br />
+        <a class="reset-link" (click)="resetTutorial()">Reiniciar tutorial</a>
+      </div>
+    }
+
+    <!-- Dismiss footer -->
+    <div class="dismiss-footer">
+      <button class="dismiss-btn" (click)="handleDismiss()">
+        No volver a mostrar
+      </button>
+      <a class="back-link" routerLink="/browse">Volver al inicio</a>
+    </div>
+  </div>
+
+  <!-- Help sidebar (desktop only) -->
+  <aside class="help-sidebar">
+    <div class="help-section">
+      <h3>Atajos de teclado</h3>
+      @for (shortcut of shortcuts; track shortcut.keys) {
+        <div class="shortcut-row">
+          <span class="shortcut-desc">{{ shortcut.desc }}</span>
+          <span class="shortcut-keys">
+            @for (key of shortcut.keys.split(' / '); track key; let i = $index) {
+              @if (i > 0) {
+                <span class="key-sep">/</span>
+              }
+              <kbd>{{ key }}</kbd>
+            }
+          </span>
+        </div>
+      }
+    </div>
+
+    <div class="help-section">
+      <h3>Estad&iacute;sticas</h3>
+      <div class="stat-row">{{ repoCount() }} repositorio(s) indexado(s)</div>
+      <div class="stat-row">{{ groupCount() }} grupo(s) conectado(s)</div>
+    </div>
+  </aside>
+</div>

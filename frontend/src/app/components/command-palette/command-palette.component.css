@@ -1,0 +1,67 @@
+:host {
+  display: contents;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px 24px;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.command-palette {
+  width: min(620px, 100%);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
+}
+
+.command-palette > input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-primary);
+  padding: 17px 18px;
+  font: 14px var(--font-mono);
+  outline: none;
+}
+
+.command-results {
+  padding: 8px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.command-results button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-results button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.command-results small {
+  color: var(--text-tertiary);
+}
+
+.command-results p {
+  color: var(--text-tertiary);
+  padding: 10px;
+}

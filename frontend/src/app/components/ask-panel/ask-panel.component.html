@@ -1,0 +1,112 @@
+@if (!open()) {
+  <button class="fab" (click)="onOpen()">
+    ¿preguntas sobre este repo?
+  </button>
+} @else {
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">preguntar al repo</span>
+      <div class="header-actions">
+        @if (messages().length > 0 && !loading()) {
+          <button class="clear-btn" (click)="onClear()" title="Limpiar conversación">
+            limpiar
+          </button>
+        }
+        <button class="close-btn" (click)="onClose()">✕</button>
+      </div>
+    </div>
+
+      @if (!ragAvailable()) {
+        <div class="degraded-banner">
+          búsqueda semántica sobre código no disponible para este repo — las respuestas se
+          basan solo en el wiki generado, sin extractos de código
+        </div>
+      }
+
+      <div #scrollContainer class="messages" (click)="handleMarkdownClick($event)">
+        @if (messages().length === 0) {
+          <div class="empty-hint">
+            @if (ragAvailable()) {
+              Pregunta algo sobre el código real del proyecto. La respuesta incluye los fragmentos de código exactos usados para generarla.
+            } @else {
+              Pregunta algo sobre la arquitectura, un módulo o cómo ejecutar el proyecto, basado en el wiki ya generado.
+            }
+          </div>
+          <div class="suggestions">
+            @for (s of suggestions; track s) {
+              <button class="suggestion-chip" (click)="useSuggestion(s); inputEl.focus()">
+                {{ s }}
+              </button>
+            }
+          </div>
+        }
+
+      @for (m of messages(); track $index) {
+        <div class="message-group">
+          <div
+            class="message"
+            [class.message-user]="m.role === 'user'"
+            [class.message-assistant]="m.role === 'assistant'"
+            [class.message-error]="m.role === 'error'"
+          >
+            @if (m.role === 'assistant') {
+              <div class="markdown-body" [innerHTML]="markdownToHtml(m.text)"></div>
+              @if (!m.streaming && m.text) {
+                <button class="copy-btn" (click)="copyText(m.text)" title="Copiar respuesta">⎘</button>
+              }
+            } @else {
+              {{ m.text }}
+            }
+          </div>
+
+          @if (m.role === 'assistant' && m.sources && m.sources.length > 0) {
+            <div class="sources-block">
+              <div class="sources-label">código usado para esta respuesta ({{ m.sources.length }})</div>
+              @for (s of m.sources; track s.file_path; let si = $index) {
+                <div class="source-card">
+                  <button class="source-header" (click)="toggleSource(s.file_path + '-' + si)">
+                    <span class="source-chevron">{{ sourceExpanded().has(s.file_path + '-' + si) ? '▾' : '▸' }}</span>
+                    <span class="source-path">{{ s.file_path }}</span>
+                    <span class="source-lines">L{{ s.start_line }}-{{ s.end_line }}</span>
+                  </button>
+                  @if (sourceExpanded().has(s.file_path + '-' + si)) {
+                    <app-highlighted-code
+                      [language]="languageFromPath(s.file_path)"
+                      [showLineNumbers]="true"
+                      [startingLineNumber]="s.start_line"
+                      [customStyle]="{ margin: '0', fontSize: '11.5px', borderTop: '1px solid var(--border-subtle)', borderRadius: '0', maxHeight: '260px' }"
+                    >{{ s.content }}</app-highlighted-code>
+                  }
+                  @if (gitLabSourceUrl(s.file_path, s.start_line, s.end_line); as url) {
+                    <a [href]="url" target="_blank" rel="noreferrer" class="source-link">abrir en GitLab ↗</a>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+
+      @if (loading() && !messages().at(-1)?.streaming) {
+        <div class="message thinking"><span class="pulse-dot"></span> pensando…</div>
+      }
+    </div>
+
+    <form class="input-row" (submit)="onAsk($event)">
+      <input
+        #inputEl
+        [value]="question()"
+        (input)="question.set($any($event.target).value)"
+        (keydown)="handleInputKeydown($event)"
+        placeholder="¿cómo se autentican los usuarios?"
+        class="input"
+        [disabled]="loading()"
+      />
+      @if (loading()) {
+        <button type="button" class="stop-btn" (click)="onStop()">■ parar</button>
+      } @else {
+        <button type="submit" class="send-btn" [disabled]="!question().trim()">enviar</button>
+      }
+    </form>
+  </div>
+}

@@ -17,6 +17,7 @@ dist/
 dist-ssr/
 frontend/.env
 .vite/
+frontend/.angular/
 
 # --- Package-manager logs ---
 logs/
@@ -29,6 +30,8 @@ lerna-debug.log*
 # --- Editor / OS ---
 .vscode/
 .idea/
+.omo/
+.opencode/
 .DS_Store
 *.log
 *.local

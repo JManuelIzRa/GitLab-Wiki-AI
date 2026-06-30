@@ -7,7 +7,7 @@ A functional clone of [DeepWiki](https://deepwiki.com) for **GitLab** repositori
 
 ```
 backend/    FastAPI API: GitLab client, static analysis, AI generation, persistence
-frontend/   React + Vite SPA: connection form, indexing progress, wiki reader
+frontend/   Angular SPA: connection form, indexing progress, wiki reader
 ```
 
 ### How it works
@@ -57,11 +57,10 @@ API at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`
 ```bash
 cd frontend
 npm install
-cp .env.example .env               # defaults to http://localhost:8000
 npm run dev
 ```
 
-App at `http://localhost:5173`.
+App at `http://localhost:4200` (with `/api` proxied to `http://localhost:8000`).
 
 ### Environment variables (`backend/.env`)
 
@@ -114,5 +113,5 @@ cd backend && uv run ruff check app tests && uv run ruff format --check app test
 uv run pytest tests/ -x -q
 
 # Frontend tests + lint
-cd frontend && npm test -- --run && npm run lint
+cd frontend && npm test -- --watch=false && npm run lint
 ```

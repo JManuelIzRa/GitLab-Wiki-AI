@@ -1,0 +1,20 @@
+<div class="highlighted-code" [ngStyle]="customStyle ?? {}">
+  @if (showLineNumbers) {
+    <div class="code-lines">
+      @for (line of processedLines; track line.number) {
+        <div class="code-line" [ngStyle]="line.style">
+          <span class="line-number">{{ line.number }}</span>
+          <span class="line-content">{{ line.code || ' ' }}</span>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="code-lines">
+      @for (line of processedLines; track $index) {
+        <div class="code-line" [ngStyle]="line.style">
+          <span class="line-content">{{ line.code || ' ' }}</span>
+        </div>
+      }
+    </div>
+  }
+</div>

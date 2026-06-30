@@ -6,7 +6,7 @@ Réplica funcional de [DeepWiki](https://deepwiki.com) para repositorios de **Gi
 
 ```
 backend/    API en FastAPI: cliente GitLab, análisis estático, generación con IA, persistencia
-frontend/   SPA en React + Vite: formulario de conexión, progreso de indexado, lector del wiki
+frontend/   SPA en Angular: formulario de conexión, progreso de indexado, lector del wiki
 ```
 
 ### Cómo funciona

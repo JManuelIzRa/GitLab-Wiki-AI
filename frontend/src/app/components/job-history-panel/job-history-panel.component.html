@@ -1,0 +1,58 @@
+<div class="modal-overlay" (click)="onOverlayClick()">
+  <section #trapEl class="history-panel" role="dialog" aria-modal="true" aria-label="Historial de indexado" (click)="onModalClick($event)">
+    @if (repository(); as repo) {
+      <header>
+        <div>
+          <strong>Historial de indexado</strong>
+          <small>{{ repo['project_path'] }}</small>
+        </div>
+        <button (click)="close.emit()">✕</button>
+      </header>
+
+      <div class="freshness-row">
+        <div>
+          <span>Commit indexado </span>
+          @if (gitLabCommitUrl(); as url) {
+            <a [href]="url" target="_blank" rel="noreferrer">{{ repo['last_commit_sha'].slice(0, 8) }} ↗</a>
+          } @else {
+            —
+          }
+        </div>
+        <button (click)="checkFreshness()" [disabled]="checking()">
+          {{ checking() ? 'comprobando…' : 'comprobar cambios' }}
+        </button>
+      </div>
+
+      @if (freshness(); as f) {
+        <div class="freshness-badge" [class.stale]="f.stale" [class.current]="!f.stale">
+          {{ f.stale ? 'Hay cambios (' + f.remote_sha.slice(0, 8) + ')' : 'Wiki al día' }}
+        </div>
+      }
+
+      @if (error()) {
+        <div class="inline-error">{{ error() }}</div>
+      }
+
+      @if (loading()) {
+        <p>Cargando…</p>
+      } @else {
+        <ol class="job-list">
+          @for (job of jobs(); track job.job_id) {
+            <li>
+              <span class="job-status" [class.done]="job.status === 'done'" [class.failed]="job.status === 'failed'">
+                {{ job.status }}
+              </span>
+              <div>
+                <strong>{{ job.current_step || 'Job #' + job.job_id }}</strong>
+                <small>{{ job.created_at ? (job.created_at | date: 'short') : '' }}</small>
+                @if (job.error_message) {
+                  <em>{{ job.error_message }}</em>
+                }
+              </div>
+            </li>
+          }
+        </ol>
+      }
+    }
+  </section>
+</div>

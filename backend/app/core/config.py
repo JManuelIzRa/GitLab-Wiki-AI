@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = 60.0
     embedding_dimensions: int = 384  # dimensión de text-embedding-3-small; ajustar si tu servicio usa otro modelo
     embedding_max_input_chars: int = 8000
-    embedding_cache_folder: str = r"D:\00.DocumentosD\Programacion\Github\GitLab-Wiki-AI\backend\cache-models"
+    embedding_provider: str = "http"  # "http" (OpenAI-compatible) or "local" (HuggingFace)
+    embedding_cache_folder: str = ""  # used when provider="local"; empty = HF default cache dir
 
     # --- Qdrant (vector store para RAG sobre código) ---
     qdrant_host: str = "localhost"
@@ -91,7 +92,7 @@ class Settings(BaseSettings):
     chat_cache_max: int = 256  # max cached RAG answers stored per repo
 
     # --- Group indexing ---
-    group_concurrency: int = 1  # repos indexed in parallel per group job
+    group_concurrency: int = 3  # repos indexed in parallel per group job
 
     @field_validator("openai_url", "embedding_url")
     @classmethod
